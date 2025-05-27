@@ -8,11 +8,12 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         .tab-button {
-            padding: 0.75rem 1.5rem;
+            padding: 0.75rem 1.25rem; /* Трохи зменшено padding для більшої кількості табів */
             cursor: pointer;
             border-bottom: 2px solid transparent;
             transition: all 0.3s ease;
             font-weight: 500;
+            white-space: nowrap; /* Щоб текст не переносився */
         }
         .tab-button.active {
             border-color: #6366F1; /* indigo-500 */
@@ -22,7 +23,12 @@
             background-color: rgba(99, 102, 241, 0.1);
         }
         .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .tab-content.active { display: block; animation: fadeIn 0.5s; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
         .form-section { transition: all 0.3s ease-in-out; }
         .form-section.hidden { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
@@ -81,7 +87,7 @@
             font-family: 'Courier New', Courier, monospace;
             white-space: pre-wrap;
             word-wrap: break-word;
-            max-height: 400px;
+            max-height: 300px; /* Трохи зменшено висоту для балансу */
             overflow-y: auto;
             border: 1px solid #374151; /* gray-700 */
         }
@@ -90,6 +96,18 @@
             font-size: 0.875rem; 
             margin-top: 0.25rem;
         }
+        .implant-list-item {
+            padding: 0.75rem;
+            border: 1px solid #4B5563;
+            border-radius: 0.375rem;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .implant-list-item:hover, .implant-list-item.selected {
+            background-color: #374151; /* gray-700 */
+            border-color: #6366F1;
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-gray-900 to-black text-gray-200 min-h-screen flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
@@ -97,13 +115,14 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-3xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v1.9.GUI</p>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.0.GUI</p>
         </header>
 
-        <div class="mb-6 border-b border-gray-700 flex">
+        <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
             <button class="tab-button" data-tab="reconnaissanceTab">Розвідка</button>
-            </div>
+            <button class="tab-button" data-tab="c2ControlTab">C2 Управління</button>
+        </div>
 
         <div id="payloadGeneratorTab" class="tab-content active">
             <h2 class="text-2xl font-semibold mb-4 text-indigo-300">Конфігурація Пейлоада</h2>
@@ -211,16 +230,66 @@
                     <button type="submit" id="startReconButton" class="w-full bg-teal-600 hover:bg-teal-700">Запустити Розвідку</button>
                 </div>
             </form>
-            <div id="reconOutputSection" class="mt-8 hidden">
+             <div id="reconOutputSection" class="mt-8 hidden">
                 <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">Результати Розвідки:</h3>
                 <div id="reconResultsOutput" class="output-area"></div>
                 <div id="reconLog" class="mt-4 text-sm text-gray-400"></div>
             </div>
         </div>
+
+        <div id="c2ControlTab" class="tab-content">
+            <h2 class="text-2xl font-semibold mb-4 text-red-400">C2 Управління (Імітація)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="md:col-span-1">
+                    <h3 class="text-lg font-semibold mb-3 text-gray-300">Активні Імпланти:</h3>
+                    <div id="implantList" class="space-y-2 max-h-96 overflow-y-auto pr-2">
+                        </div>
+                </div>
+
+                <div class="md:col-span-2">
+                    <div id="selectedImplantSection" class="hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="text-lg font-semibold mb-3 text-red-300">Взаємодія з <span id="selectedImplantId" class="font-mono"></span></h3>
+                        <form id="c2TaskForm" class="space-y-4">
+                            <div>
+                                <label for="c2TaskType" class="text-gray-300">Тип Завдання:</label>
+                                <select id="c2TaskType" name="c2_task_type" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                    <option value="getsysinfo">Отримати Інформацію про Систему</option>
+                                    <option value="listdir">Перелік Директорії</option>
+                                    <option value="exec">Виконати Команду (Імітація)</option>
+                                </select>
+                            </div>
+                            <div id="c2TaskParamsContainer">
+                                <div id="params_listdir" class="hidden">
+                                     <label for="c2ListdirPath" class="text-gray-300">Шлях до Директорії:</label>
+                                     <input type="text" id="c2ListdirPath" name="listdir_path" placeholder="напр. /tmp або C:\\Users" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                </div>
+                                <div id="params_exec" class="hidden">
+                                     <label for="c2ExecCommand" class="text-gray-300">Команда для Виконання:</label>
+                                     <input type="text" id="c2ExecCommand" name="exec_command" placeholder="напр. whoami або ls -la" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                </div>
+                            </div>
+                            <div class="pt-2">
+                                <button type="submit" id="sendTaskButton" class="w-full bg-red-600 hover:bg-red-700">Надіслати Завдання</button>
+                            </div>
+                        </form>
+                    </div>
+                    <div id="c2NoImplantSelected" class="text-center text-gray-400 p-8">
+                        Оберіть імплант зі списку для взаємодії.
+                    </div>
+                </div>
+            </div>
+            <div id="c2OutputSection" class="mt-8">
+                <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-500">Вивід C2 / Лог Завдань:</h3>
+                <div id="c2ResultsOutput" class="output-area">
+                    Лог взаємодії з C2 буде тут...
+                </div>
+            </div>
+        </div>
+
     </div>
 
 <script>
-    // --- Загальна логіка для табів ---
+    // --- Загальна логіка для табів (без змін) ---
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
 
@@ -234,7 +303,7 @@
         });
     });
 
-    // --- Логіка для Генератора Пейлоадів (з попередньої версії, адаптована) ---
+    // --- Логіка для Генератора Пейлоадів (без змін) ---
     const payloadForm = document.getElementById('payloadGeneratorForm');
     const payloadArchetypeSelect = document.getElementById('payloadArchetype');
     const payloadArchetypeParamsContainer = document.getElementById('archetypeParamsContainer');
@@ -242,13 +311,11 @@
     const payloadStagerOutput = document.getElementById('payloadStagerOutput');
     const payloadGenerationLog = document.getElementById('payloadGenerationLog');
     const generatePayloadButton = document.getElementById('generatePayloadButton');
-
     const payloadParamSections = {
         "demo_echo_payload": document.getElementById('params_demo_echo_payload'),
         "demo_file_lister_payload": document.getElementById('params_demo_file_lister_payload'),
         "demo_c2_beacon_payload": document.getElementById('params_demo_c2_beacon_payload')
     };
-    
     const payloadParamSchema = {
         "payload_archetype": { required: true, idPrefix: "payloadArchetype" },
         "message_to_echo": { requiredIf: "demo_echo_payload", minLength: 1, idPrefix: "messageToEcho" },
@@ -257,143 +324,110 @@
         "c2_target_port": { requiredIf: "demo_c2_beacon_payload", isPort: true, idPrefix: "c2TargetPort" },
         "obfuscation_key": { required: true, minLength: 5, idPrefix: "obfuscationKey" }
     };
-
     payloadArchetypeSelect.addEventListener('change', function() {
         const selectedArchetype = this.value;
         payloadGenerationLog.textContent = ''; 
         payloadOutputSection.classList.add('hidden');
-
         Object.values(payloadParamSections).forEach(section => {
             if (section) section.classList.add('hidden');
         });
-
         if (selectedArchetype && payloadParamSections[selectedArchetype]) {
             payloadParamSections[selectedArchetype].classList.remove('hidden');
         }
         clearPayloadErrors();
     });
-
     function clearPayloadErrors() {
         document.querySelectorAll('#payloadGeneratorForm .error-message').forEach(el => el.textContent = '');
     }
-
-    function displayPayloadError(fieldIdPrefix, message) {
+    function displayPayloadError(fieldIdPrefix, message) { // Зробимо її глобальною для використання в recon
         const errorEl = document.getElementById(`error-${fieldIdPrefix}`);
         if (errorEl) errorEl.textContent = message;
     }
-
     function validatePayloadForm(formData) {
         clearPayloadErrors();
         let isValid = true;
         const currentArchetype = formData.get('payload_archetype');
-
         for (const fieldName in payloadParamSchema) {
             const rules = payloadParamSchema[fieldName];
             const value = formData.get(fieldName);
             let isRequired = rules.required;
-            
             if (rules.requiredIf && rules.requiredIf === currentArchetype) isRequired = true;
             else if (rules.requiredIf && rules.requiredIf !== currentArchetype) isRequired = false;
-
             if (isRequired && (!value || String(value).trim() === '')) {
                 displayPayloadError(rules.idPrefix, `Параметр '${fieldName}' є обов'язковим.`);
                 isValid = false; continue;
             }
-            
             if (value) {
                 if (rules.minLength && String(value).length < rules.minLength) {
-                    displayPayloadError(rules.idPrefix, `Мінімальна довжина для '${fieldName}': ${rules.minLength} символів.`);
-                    isValid = false;
+                    displayPayloadError(rules.idPrefix, `Мінімальна довжина для '${fieldName}': ${rules.minLength} символів.`); isValid = false;
                 }
                 if (rules.isHost && !/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$/.test(String(value))) {
-                     displayPayloadError(rules.idPrefix, `Невірний формат для '${fieldName}'. Очікується IP або домен.`);
-                     isValid = false;
+                     displayPayloadError(rules.idPrefix, `Невірний формат для '${fieldName}'. Очікується IP або домен.`); isValid = false;
                 }
                 if (rules.isPort) {
                     const portNum = parseInt(String(value), 10);
                     if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-                        displayPayloadError(rules.idPrefix, `Порт для '${fieldName}' має бути числом від 1 до 65535.`);
-                        isValid = false;
+                        displayPayloadError(rules.idPrefix, `Порт для '${fieldName}' має бути числом від 1 до 65535.`); isValid = false;
                     }
                 }
             }
         }
         return isValid;
     }
-
     payloadForm.addEventListener('submit', function(event) {
         event.preventDefault();
-        generatePayloadButton.disabled = true;
-        generatePayloadButton.textContent = 'Генерація...';
-        
+        generatePayloadButton.disabled = true; generatePayloadButton.textContent = 'Генерація...';
         const formData = new FormData(payloadForm);
         const params = Object.fromEntries(formData.entries());
-        
         params.enable_stager_metamorphism = document.getElementById('enableStagerMetamorphism').checked;
         params.enable_evasion_checks = document.getElementById('enableEvasionChecks').checked;
-
         if (!validatePayloadForm(formData)) {
             payloadGenerationLog.textContent = '[VALIDATOR_FAILURE] Будь ласка, виправте помилки у формі.';
             payloadOutputSection.classList.add('hidden');
-            generatePayloadButton.disabled = false;
-            generatePayloadButton.textContent = 'Згенерувати Пейлоад';
+            generatePayloadButton.disabled = false; generatePayloadButton.textContent = 'Згенерувати Пейлоад';
             return;
         }
-        
         payloadGenerationLog.textContent = '[WORKFLOW_INFO] Параметри отримано. Імітація генерації пейлоада...\n';
-        
         setTimeout(() => {
             try {
                 payloadGenerationLog.textContent += `[VALIDATOR_SUCCESS] Валідація параметрів для '${params.payload_archetype}' успішна.\n`;
                 payloadGenerationLog.textContent += `[ARCHETYPE_SELECTOR_SUCCESS] Архетип '${params.payload_archetype}' обрано.\n`;
-
                 let dataToObfuscate = "";
                 if (params.payload_archetype === "demo_echo_payload") dataToObfuscate = params.message_to_echo || "Default Echo Message";
                 else if (params.payload_archetype === "demo_file_lister_payload") dataToObfuscate = params.directory_to_list || ".";
                 else if (params.payload_archetype === "demo_c2_beacon_payload") dataToObfuscate = `${params.c2_target_host}:${params.c2_target_port}`;
-                
                 const key = params.obfuscation_key || "DefaultKey";
                 payloadGenerationLog.textContent += `[OBFUSCATOR_INFO] Обфускація даних для '${params.payload_archetype}' з ключем '${key}'...\n`;
-                
                 let obfuscatedData = "";
                 for (let i = 0; i < dataToObfuscate.length; i++) {
                     obfuscatedData += String.fromCharCode(dataToObfuscate.charCodeAt(i) ^ key.charCodeAt(i % key.length));
                 }
                 const obfuscatedDataB64 = btoa(obfuscatedData);
                 payloadGenerationLog.textContent += `[OBFUSCATOR_SUCCESS] Дані обфусковано.\n`;
-
                 payloadGenerationLog.textContent += `[STAGER_GENERATOR_INFO] Генерація стейджера типу '${params.payload_archetype}' (Метаморфізм: ${params.enable_stager_metamorphism}, Ухилення: ${params.enable_evasion_checks}, Формат: ${params.output_format})...\n`;
-                
-                let stagerCodeRaw = `# SYNTAX Conceptual Stager (GUI Demo v1.9) - ${new Date().toISOString()}\n`;
-                stagerCodeRaw += `# Archetype: ${params.payload_archetype}\n`;
-                stagerCodeRaw += `OBFUSCATED_DATA_B64 = "${obfuscatedDataB64}"\nOBFUSCATION_KEY = "${key}"\n`;
-                stagerCodeRaw += `METAMORPHISM_ENABLED = ${params.enable_stager_metamorphism}\nEVASION_ENABLED = ${params.enable_evasion_checks}\n\n`;
-                stagerCodeRaw += `print("[STAGER_CONCEPT] Запуск імітованого стейджера...")\n`;
-                // ... (тут могла б бути більш детальна імітація коду стейджера)
-
+                let stagerCodeRaw = `# SYNTAX Conceptual Stager (GUI Demo v2.0) - ${new Date().toISOString()}\n`;
+                stagerCodeRaw += `# Archetype: ${params.payload_archetype}\nOBFUSCATED_DATA_B64 = "${obfuscatedDataB64}"\nOBFUSCATION_KEY = "${key}"\n`;
+                stagerCodeRaw += `METAMORPHISM_ENABLED = ${params.enable_stager_metamorphism}\nEVASION_ENABLED = ${params.enable_evasion_checks}\n\nprint("[STAGER_CONCEPT] Запуск імітованого стейджера...")\n`;
                 let finalStagerOutput = stagerCodeRaw;
                 if (params.output_format === "base64_encoded_stager") {
                     finalStagerOutput = btoa(stagerCodeRaw);
                     payloadGenerationLog.textContent += `[STAGER_GENERATOR_INFO] Стейджер закодовано в Base64.\n`;
                 }
-                
                 payloadStagerOutput.textContent = finalStagerOutput;
                 payloadOutputSection.classList.remove('hidden');
                 payloadGenerationLog.textContent += `[WORKFLOW_SUCCESS] Генерацію пейлоада завершено.\n`;
-
             } catch (e) {
                 payloadGenerationLog.textContent += `[WORKFLOW_FAILURE] Помилка під час генерації пейлоада: ${e.message}\n`;
                 payloadStagerOutput.textContent = `Помилка: ${e.message}`;
                 payloadOutputSection.classList.remove('hidden');
             } finally {
-                generatePayloadButton.disabled = false;
-                generatePayloadButton.textContent = 'Згенерувати Пейлоад';
+                generatePayloadButton.disabled = false; generatePayloadButton.textContent = 'Згенерувати Пейлоад';
             }
         }, 700); 
     });
-    payloadArchetypeSelect.dispatchEvent(new Event('change')); // Ініціалізація
+    if (payloadArchetypeSelect) payloadArchetypeSelect.dispatchEvent(new Event('change'));
 
-    // --- Логіка для Модуля Розвідки ---
+    // --- Логіка для Модуля Розвідки (без змін) ---
     const reconForm = document.getElementById('reconForm');
     const reconTargetInput = document.getElementById('reconTarget');
     const reconTypeSelect = document.getElementById('reconType');
@@ -401,83 +435,187 @@
     const reconOutputSection = document.getElementById('reconOutputSection');
     const reconResultsOutput = document.getElementById('reconResultsOutput');
     const reconLog = document.getElementById('reconLog');
-
-    reconForm.addEventListener('submit', function(event) {
-        event.preventDefault();
-        startReconButton.disabled = true;
-        startReconButton.textContent = 'Розвідка...';
-        reconLog.textContent = '';
-        reconResultsOutput.textContent = '';
-
-        const target = reconTargetInput.value.trim();
-        const type = reconTypeSelect.value;
-        
-        let reconIsValid = true;
-        document.getElementById('error-reconTarget').textContent = '';
-        if (!target) {
-            displayPayloadError('reconTarget', 'Ціль для розвідки є обов\'язковою.'); // Використовуємо стару функцію, але з новим ID
-            reconIsValid = false;
-        } else if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$/.test(target)) {
-            displayPayloadError('reconTarget', 'Невірний формат цілі. Очікується IP або домен.');
-            reconIsValid = false;
-        }
-
-
-        if (!reconIsValid) {
-            startReconButton.disabled = false;
-            startReconButton.textContent = 'Запустити Розвідку';
-            return;
-        }
-
-        reconLog.textContent = `[RECON_INFO] Запуск розвідки типу '${type}' для цілі '${target}'...\n`;
-        
-        setTimeout(() => {
-            try {
-                let results = `Результати розвідки для: ${target} (тип: ${type})\n`;
-                results += `Час: ${new Date().toLocaleString()}\n\n`;
-
-                if (type === 'port_scan_basic') {
-                    results += "Імітація сканування портів (SRU-1.1.0 концепт):\n";
-                    const commonPorts = [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 3306, 3389, 5900, 8080, 8443];
-                    const openPorts = commonPorts.filter(() => Math.random() > 0.6); // Випадково "відкриваємо" деякі порти
-                    if (openPorts.length > 0) {
-                        openPorts.forEach(port => {
-                            results += `  Порт ${port} (${getServiceName(port)}): ВІДКРИТО\n`;
-                            if (Math.random() > 0.5) { // Імітація банера
-                                results += `    Банер: ServiceBanner_Demo_v${(Math.random() * 3).toFixed(1)} on SimulatedOS\n`;
-                            }
-                        });
-                    } else {
-                        results += "  Відкритих портів (з поширених) не знайдено (імітація).\n";
-                    }
-                } else if (type === 'osint_email_search') {
-                    results += "Імітація пошуку Email (OSINT):\n";
-                    const targetDomain = target.includes('.') ? target.substring(target.lastIndexOf('.', target.lastIndexOf('.') - 1) + 1) : target;
-                    const names = ["john.doe", "jane.smith", "info", "support", "admin"];
-                    const foundEmails = names.filter(() => Math.random() > 0.5).map(name => `${name}@${targetDomain}`);
-                    if (foundEmails.length > 0) {
-                        foundEmails.forEach(email => results += `  Знайдено Email: ${email}\n`);
-                    } else {
-                        results += "  Email-адрес не знайдено (імітація).\n";
-                    }
-                }
-                reconResultsOutput.textContent = results;
-                reconLog.textContent += "[RECON_SUCCESS] Розвідку (імітацію) завершено.\n";
-            } catch (e) {
-                reconLog.textContent += `[RECON_FAILURE] Помилка під час розвідки: ${e.message}\n`;
-                reconResultsOutput.textContent = `Помилка: ${e.message}`;
-            } finally {
-                reconOutputSection.classList.remove('hidden');
-                startReconButton.disabled = false;
-                startReconButton.textContent = 'Запустити Розвідку';
+    if (reconForm) {
+        reconForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            startReconButton.disabled = true; startReconButton.textContent = 'Розвідка...';
+            reconLog.textContent = ''; reconResultsOutput.textContent = '';
+            const target = reconTargetInput.value.trim();
+            const type = reconTypeSelect.value;
+            let reconIsValid = true;
+            document.getElementById('error-reconTarget').textContent = '';
+            if (!target) {
+                displayPayloadError('reconTarget', 'Ціль для розвідки є обов\'язковою.'); reconIsValid = false;
+            } else if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$/.test(target)) {
+                displayPayloadError('reconTarget', 'Невірний формат цілі. Очікується IP або домен.'); reconIsValid = false;
             }
-        }, 1200); // Імітація затримки на розвідку
-    });
-
-    function getServiceName(port) { // Допоміжна функція для імен сервісів
+            if (!reconIsValid) {
+                startReconButton.disabled = false; startReconButton.textContent = 'Запустити Розвідку'; return;
+            }
+            reconLog.textContent = `[RECON_INFO] Запуск розвідки типу '${type}' для цілі '${target}'...\n`;
+            setTimeout(() => {
+                try {
+                    let results = `Результати розвідки для: ${target} (тип: ${type})\nЧас: ${new Date().toLocaleString()}\n\n`;
+                    if (type === 'port_scan_basic') {
+                        results += "Імітація сканування портів (SRU-1.1.0 концепт):\n";
+                        const commonPorts = [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 3306, 3389, 5900, 8080, 8443];
+                        const openPorts = commonPorts.filter(() => Math.random() > 0.6);
+                        if (openPorts.length > 0) {
+                            openPorts.forEach(port => {
+                                results += `  Порт ${port} (${getServiceName(port)}): ВІДКРИТО\n`;
+                                if (Math.random() > 0.5) results += `    Банер: ServiceBanner_Demo_v${(Math.random() * 3).toFixed(1)} on SimulatedOS\n`;
+                            });
+                        } else results += "  Відкритих портів (з поширених) не знайдено (імітація).\n";
+                    } else if (type === 'osint_email_search') {
+                        results += "Імітація пошуку Email (OSINT):\n";
+                        const targetDomain = target.includes('.') ? target.substring(target.lastIndexOf('.', target.lastIndexOf('.') - 1) + 1) : target;
+                        const names = ["john.doe", "jane.smith", "info", "support", "admin"];
+                        const foundEmails = names.filter(() => Math.random() > 0.5).map(name => `${name}@${targetDomain}`);
+                        if (foundEmails.length > 0) foundEmails.forEach(email => results += `  Знайдено Email: ${email}\n`);
+                        else results += "  Email-адрес не знайдено (імітація).\n";
+                    }
+                    reconResultsOutput.textContent = results;
+                    reconLog.textContent += "[RECON_SUCCESS] Розвідку (імітацію) завершено.\n";
+                } catch (e) {
+                    reconLog.textContent += `[RECON_FAILURE] Помилка під час розвідки: ${e.message}\n`;
+                    reconResultsOutput.textContent = `Помилка: ${e.message}`;
+                } finally {
+                    reconOutputSection.classList.remove('hidden');
+                    startReconButton.disabled = false; startReconButton.textContent = 'Запустити Розвідку';
+                }
+            }, 1200);
+        });
+    }
+    function getServiceName(port) {
         const services = { 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3", 443: "HTTPS", 3306: "MySQL", 3389: "RDP", 8080: "HTTP-Alt" };
         return services[port] || "Unknown";
     }
+
+    // --- Нова Логіка для C2 Управління ---
+    const c2ControlTab = document.getElementById('c2ControlTab');
+    const implantListDiv = document.getElementById('implantList');
+    const selectedImplantSection = document.getElementById('selectedImplantSection');
+    const c2NoImplantSelectedDiv = document.getElementById('c2NoImplantSelected');
+    const selectedImplantIdSpan = document.getElementById('selectedImplantId');
+    const c2TaskForm = document.getElementById('c2TaskForm');
+    const c2TaskTypeSelect = document.getElementById('c2TaskType');
+    const c2TaskParamsContainer = document.getElementById('c2TaskParamsContainer');
+    const c2ResultsOutput = document.getElementById('c2ResultsOutput');
+    const sendTaskButton = document.getElementById('sendTaskButton');
+
+    let simulatedImplants = [];
+    let selectedImplant = null;
+
+    function generateSimulatedImplants() {
+        simulatedImplants = [];
+        const osTypes = ["Windows_x64", "Linux_x64", "Windows_x86"];
+        const baseIP = "192.168.1.";
+        for (let i = 0; i < 5; i++) { // Генеруємо 5 імітованих імплантів
+            const id = `SYNIMPLNT-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+            const ip = baseIP + (100 + i);
+            const os = osTypes[Math.floor(Math.random() * osTypes.length)];
+            const lastSeen = new Date(Date.now() - Math.random() * 1000 * 60 * 60).toLocaleString(); // Остання година
+            simulatedImplants.push({ id, ip, os, lastSeen });
+        }
+    }
+
+    function renderImplantList() {
+        implantListDiv.innerHTML = ''; // Очистити список
+        if (simulatedImplants.length === 0) {
+            implantListDiv.innerHTML = '<p class="text-gray-400">Активних імплантів не виявлено (імітація).</p>';
+            return;
+        }
+        simulatedImplants.forEach(implant => {
+            const implantDiv = document.createElement('div');
+            implantDiv.className = 'implant-list-item';
+            implantDiv.innerHTML = `
+                <p class="font-semibold text-indigo-300">${implant.id}</p>
+                <p class="text-sm text-gray-400">IP: ${implant.ip} | OS: ${implant.os}</p>
+                <p class="text-xs text-gray-500">Останній зв'язок: ${implant.lastSeen}</p>
+            `;
+            implantDiv.addEventListener('click', () => selectImplant(implant));
+            if (selectedImplant && selectedImplant.id === implant.id) {
+                implantDiv.classList.add('selected');
+            }
+            implantListDiv.appendChild(implantDiv);
+        });
+    }
+    
+    function selectImplant(implant) {
+        selectedImplant = implant;
+        selectedImplantIdSpan.textContent = implant.id;
+        selectedImplantSection.classList.remove('hidden');
+        c2NoImplantSelectedDiv.classList.add('hidden');
+        renderImplantList(); // Перерендерити список, щоб підсвітити обраний
+        updateC2TaskParams(); // Оновити поля параметрів для завдання
+        logToC2Output(`Обрано імплант: ${implant.id} (${implant.ip})`);
+    }
+
+    function updateC2TaskParams() {
+        const taskType = c2TaskTypeSelect.value;
+        document.getElementById('params_listdir').classList.add('hidden');
+        document.getElementById('params_exec').classList.add('hidden');
+
+        if (taskType === 'listdir') {
+            document.getElementById('params_listdir').classList.remove('hidden');
+        } else if (taskType === 'exec') {
+            document.getElementById('params_exec').classList.remove('hidden');
+        }
+    }
+    
+    c2TaskTypeSelect.addEventListener('change', updateC2TaskParams);
+
+    function logToC2Output(message) {
+        const timestamp = new Date().toLocaleTimeString();
+        c2ResultsOutput.innerHTML += `[${timestamp}] ${message}\n`;
+        c2ResultsOutput.scrollTop = c2ResultsOutput.scrollHeight; // Автопрокрутка вниз
+    }
+
+    c2TaskForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        if (!selectedImplant) {
+            logToC2Output("[C2_ERROR] Не обрано жодного імпланта для надсилання завдання.");
+            return;
+        }
+        sendTaskButton.disabled = true;
+        sendTaskButton.textContent = 'Надсилання...';
+
+        const taskType = c2TaskTypeSelect.value;
+        let taskParams = "";
+        if (taskType === 'listdir') {
+            taskParams = document.getElementById('c2ListdirPath').value || ".";
+        } else if (taskType === 'exec') {
+            taskParams = document.getElementById('c2ExecCommand').value || "whoami";
+        }
+        
+        logToC2Output(`[C2_TASK_SENT] Надсилання завдання '${taskType}' з параметрами '${taskParams}' на імплант ${selectedImplant.id}...`);
+
+        setTimeout(() => {
+            try {
+                let taskResult = `Результат завдання '${taskType}' для ${selectedImplant.id}:\n`;
+                if (taskType === 'getsysinfo') {
+                    taskResult += `  OS: ${selectedImplant.os}\n  IP: ${selectedImplant.ip}\n  User: SimulatedUser\n  Hostname: ${selectedImplant.id.replace("SYNIMPLNT-","HOST-")}`;
+                } else if (taskType === 'listdir') {
+                    taskResult += `  Перелік для '${taskParams}':\n    - fileA.txt\n    - important_doc.docx\n    - (імітація)`;
+                } else if (taskType === 'exec') {
+                    taskResult += `  Виконання '${taskParams}':\n    Команда виконана успішно (імітація).\n    Вивід: ... (дані з '${taskParams}') ...`;
+                }
+                logToC2Output(`[C2_TASK_RESULT] ${taskResult}`);
+            } catch(e) {
+                logToC2Output(`[C2_TASK_ERROR] Помилка імітації завдання: ${e.message}`);
+            } finally {
+                sendTaskButton.disabled = false;
+                sendTaskButton.textContent = 'Надіслати Завдання';
+            }
+        }, 1000); // Імітація затримки виконання завдання
+    });
+
+    // Ініціалізація C2 вкладки
+    generateSimulatedImplants();
+    renderImplantList();
+    updateC2TaskParams(); // Для початкового стану
+    if (c2ResultsOutput) c2ResultsOutput.textContent = "Очікування команд...\n";
+
 
 </script>
 </body>
