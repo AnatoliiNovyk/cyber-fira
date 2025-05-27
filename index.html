@@ -126,7 +126,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-3xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.4.GUI</p>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.5.GUI</p>
         </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
@@ -417,129 +417,33 @@
         return isValid;
     }
 
-    function applyCFO_JS(codeLines) { // Перейменовано, щоб уникнути конфлікту з Python, якщо будемо змішувати
+    // --- Оновлена функція для імітації CFO ---
+    function applyCFO_JS(codeLines) {
         let cfoAppliedCode = "";
+        const cfoPatterns = [
+            (indent, r1, r2) => `${indent}if ${r1} != ${r1 + r2 + 1}: # CFO: Opaque Predicate (True)\n${indent}    pass # CFO Block A\n${indent}else:\n${indent}    pass # CFO: Dead Code`,
+            (indent, r1, r2) => `${indent}if (${r1} * ${r2}) == (${r1 * r2 -1}): # CFO: Opaque Predicate (False)\n${indent}    pass # CFO: Dead Code\n${indent}else:\n${indent}    pass # CFO Block B`,
+            (indent, r1, r2) => `${indent}for _cfo_loop_var in range(${Math.floor(Math.random()*2)+1}): # CFO: Small junk loop\n${indent}    pass\n${indent}# Original logic follows`,
+            (indent, r1, r2) => `${indent}cfo_temp_var = ${r1} + ${r2} - ${r1}\n${indent}if cfo_temp_var == ${r2}: # CFO: True by calculation\n${indent}    pass # CFO Block C\n${indent}else:\n${indent}    pass # CFO: Dead Code`
+        ];
+
         codeLines.forEach(line => {
             cfoAppliedCode += line + "\n";
-            if (Math.random() < 0.2 && line.trim().length > 0 && !line.trim().startsWith("#")) { 
+            if (Math.random() < 0.25 && line.trim().length > 0 && !line.trim().startsWith("#")) { 
                 const indent = line.match(/^(\s*)/)[0];
                 const rVal1 = Math.floor(Math.random() * 100);
                 const rVal2 = Math.floor(Math.random() * 100);
-                if (Math.random() < 0.5) {
-                    cfoAppliedCode += `${indent}if ${rVal1} < ${rVal1 + Math.floor(Math.random() * 5 + 1)}: # CFO: Opaque Predicate (True)\n`;
-                    cfoAppliedCode += `${indent}    pass # CFO Block 1 (Logic)\n`;
-                    cfoAppliedCode += `${indent}    # Original line could be injected here by a more complex engine\n`;
-                    cfoAppliedCode += `${indent}else:\n`;
-                    cfoAppliedCode += `${indent}    # CFO: Dead Code Block\n`;
-                    cfoAppliedCode += `${indent}    dead_var_${Math.floor(Math.random()*1000)} = ${rVal2}\n`;
-                    cfoAppliedCode += `${indent}    pass \n`;
-                } else {
-                    cfoAppliedCode += `${indent}if (${rVal1} * ${rVal2}) == (${rVal1 * rVal2 + Math.floor(Math.random() * 5 + 1)}): # CFO: Opaque Predicate (False)\n`;
-                    cfoAppliedCode += `${indent}    pass # CFO: Dead Code Block\n`;
-                    cfoAppliedCode += `${indent}else:\n`;
-                    cfoAppliedCode += `${indent}    pass # CFO Block 2 (Logic)\n`;
-                    cfoAppliedCode += `${indent}    # Original line could be injected here\n`;
-                }
-                 cfoAppliedCode += `${indent}# Random comment: ${Math.random().toString(36).substring(7)}\n`;
+                const selectedPattern = cfoPatterns[Math.floor(Math.random() * cfoPatterns.length)];
+                cfoAppliedCode += selectedPattern(indent, rVal1, rVal2) + "\n";
+                cfoAppliedCode += `${indent}# Random comment: ${Math.random().toString(36).substring(2, 10)}\n`;
             }
         });
         return cfoAppliedCode;
     }
 
-    // Імітація функції "backend" для генерації пейлоада
-    async function simulateBackendPayloadGeneration(params) {
-        return new Promise((resolve, reject) => {
-            payloadGenerationLog.textContent += `[BACKEND_SIM_INFO] Отримано запит на генерацію з параметрами: ${JSON.stringify(params)}\n`;
-            
-            setTimeout(() => {
-                try {
-                    let logMessages = ["[BACKEND_SIM_INFO] Валідація параметрів на сервері... Успішно."];
-                    logMessages.push(`[BACKEND_SIM_INFO] Обрано архетип: ${params.payload_archetype}.`);
-                    
-                    let dataToObfuscate = "";
-                    if (params.payload_archetype === "demo_echo_payload") dataToObfuscate = params.message_to_echo || "Default Echo Message";
-                    else if (params.payload_archetype === "demo_file_lister_payload") dataToObfuscate = params.directory_to_list || ".";
-                    else if (params.payload_archetype === "demo_c2_beacon_payload") dataToObfuscate = `${params.c2_target_host}:${params.c2_target_port}`;
-                    
-                    const key = params.obfuscation_key || "DefaultKey";
-                    logMessages.push(`[BACKEND_SIM_INFO] Обфускація даних з ключем '${key}'...`);
-                    
-                    let obfuscatedData = "";
-                    for (let i = 0; i < dataToObfuscate.length; i++) {
-                        obfuscatedData += String.fromCharCode(dataToObfuscate.charCodeAt(i) ^ key.charCodeAt(i % key.length));
-                    }
-                    const obfuscatedDataB64 = btoa(obfuscatedData); // Simulate latin-1 to Base64
-                    logMessages.push(`[BACKEND_SIM_INFO] Дані обфусковано: ${obfuscatedDataB64.substring(0,20)}...`);
-
-                    logMessages.push(`[BACKEND_SIM_INFO] Генерація стейджера (Метаморфізм: ${params.enable_stager_metamorphism}, Ухилення: ${params.enable_evasion_checks})...`);
-                    
-                    let stagerCodeLines = [
-                        `# SYNTAX Conceptual Stager (Backend Sim v2.4) - ${new Date().toISOString()}`,
-                        `# Archetype: ${params.payload_archetype}`,
-                        `OBFUSCATED_DATA_B64 = "${obfuscatedDataB64}"`,
-                        `OBFUSCATION_KEY = "${key}"`,
-                        `METAMORPHISM_ENABLED = ${params.enable_stager_metamorphism}`,
-                        `EVASION_ENABLED = ${params.enable_evasion_checks}`,
-                        ``,
-                        `# Імітація логіки Python стейджера`,
-                        `def xor_decode(b64_data, key_str):`,
-                        `    # Імітація декодування`,
-                        `    # У реальному Python: base64.b64decode -> bytes.decode -> xor`,
-                        `    # Тут JS імітація для простоти`,
-                        `    try:`,
-                        `        decoded_data = atob(b64_data) # Base64 to string (може містити не-ASCII)`,
-                        `        original_chars = []`,
-                        `        for i in range(len(decoded_data)):`,
-                        `            original_chars.append(String.fromCharCode(decoded_data.charCodeAt(i) ^ key_str.charCodeAt(i % key_str.length)))`,
-                        `        return "".join(original_chars)`,
-                        `    except Exception as e_decode:`,
-                        `        print(f"[STAGER_ERROR] Decode error: {e_decode}")`,
-                        `        return None`,
-                        ``,
-                        `def run_payload_logic(decoded_content):`,
-                        `    print(f"[STAGER_CONCEPT ({params.payload_archetype})] Деобфускований вміст: {{decoded_content}}")`,
-                        `    if "${params.payload_archetype}" == "demo_c2_beacon_payload":`,
-                        `        print("[STAGER_CONCEPT] ...імітація надсилання маячка та отримання завдання 'run_extended_diagnostics'...")`,
-                        ``,
-                        `print("[STAGER_CONCEPT] Запуск імітованого стейджера...")`,
-                        `content = xor_decode(OBFUSCATED_DATA_B64, OBFUSCATION_KEY)`,
-                        `if content is not None: run_payload_logic(content)`
-                    ];
-                    
-                    let stagerCodeRaw = stagerCodeLines.join("\n");
-
-                    if (params.enable_stager_metamorphism) {
-                        logMessages.push(`[BACKEND_SIM_INFO] Застосування розширеного метаморфізму (включаючи CFO)...`);
-                        stagerCodeRaw = applyCFO_JS(stagerCodeLines).trim(); 
-                        stagerCodeRaw = stagerCodeRaw.replace(/print/g, `log_output_${Math.random().toString(36).substring(2,7)}`); 
-                        stagerCodeRaw = `def log_output_${Math.random().toString(36).substring(2,7)}(s): print(s) # Renamed print\n\n` + stagerCodeRaw;
-                        logMessages.push(`[BACKEND_SIM_INFO] Метаморфізм застосовано.`);
-                    }
-                     if (params.enable_evasion_checks) {
-                         logMessages.push(`[BACKEND_SIM_INFO] Додавання перевірок ухилення (імітація)...`);
-                         stagerCodeRaw = `print("[EVASION_CHECK] Перевірка середовища... ОК (імітація)")\n` + stagerCodeRaw;
-                    }
-
-
-                    let finalStagerOutput = stagerCodeRaw;
-                    if (params.output_format === "base64_encoded_stager") {
-                        finalStagerOutput = btoa(stagerCodeRaw); // JS btoa для UTF-8
-                        logMessages.push(`[BACKEND_SIM_INFO] Стейджер закодовано в Base64.`);
-                    }
-                    
-                    logMessages.push(`[BACKEND_SIM_INFO] Генерацію пейлоада на сервері завершено.`);
-                    resolve({ success: true, stagerCode: finalStagerOutput, generationLog: logMessages.join("\n") });
-
-                } catch (e) {
-                    reject({ success: false, error: e.message, generationLog: logMessages.join("\n") + `\n[BACKEND_SIM_ERROR] ${e.message}` });
-                }
-            }, 1500); // Збільшено затримку для імітації роботи сервера
-        });
-    }
-
 
     if(payloadForm) {
-        payloadForm.addEventListener('submit', async function(event) { // Зроблено async
+        payloadForm.addEventListener('submit', async function(event) { 
             event.preventDefault();
             generatePayloadButton.disabled = true; 
             generatePayloadButton.innerHTML = `
@@ -566,7 +470,7 @@
             payloadOutputSection.classList.remove('hidden');
 
             try {
-                const backendResponse = await simulateBackendPayloadGeneration(params);
+                const backendResponse = await simulateBackendPayloadGeneration(params); // Використовуємо simulateBackendPayloadGeneration
                 payloadGenerationLog.textContent = backendResponse.generationLog;
                 if (backendResponse.success) {
                     payloadStagerOutput.textContent = backendResponse.stagerCode;
@@ -583,6 +487,90 @@
         });
     }
     if (payloadArchetypeSelect) payloadArchetypeSelect.dispatchEvent(new Event('change'));
+    
+    // Імітація функції "backend" для генерації пейлоада (з версії 2.4.GUI, але з викликом оновленої applyCFO_JS)
+    async function simulateBackendPayloadGeneration(params) {
+        return new Promise((resolve, reject) => {
+            let logMessages = ["[BACKEND_SIM_INFO] Отримано запит на генерацію..."];
+            
+            setTimeout(() => {
+                try {
+                    logMessages.push(`[BACKEND_SIM_INFO] Валідація параметрів... Успішно.`);
+                    logMessages.push(`[BACKEND_SIM_INFO] Обрано архетип: ${params.payload_archetype}.`);
+                    
+                    let dataToObfuscate = "";
+                    if (params.payload_archetype === "demo_echo_payload") dataToObfuscate = params.message_to_echo || "Default Echo Message";
+                    else if (params.payload_archetype === "demo_file_lister_payload") dataToObfuscate = params.directory_to_list || ".";
+                    else if (params.payload_archetype === "demo_c2_beacon_payload") dataToObfuscate = `${params.c2_target_host}:${params.c2_target_port}`;
+                    
+                    const key = params.obfuscation_key || "DefaultKey";
+                    logMessages.push(`[BACKEND_SIM_INFO] Обфускація даних з ключем '${key}'...`);
+                    let obfuscatedData = "";
+                    for (let i = 0; i < dataToObfuscate.length; i++) {
+                        obfuscatedData += String.fromCharCode(dataToObfuscate.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+                    }
+                    const obfuscatedDataB64 = btoa(obfuscatedData);
+                    logMessages.push(`[BACKEND_SIM_INFO] Дані обфусковано: ${obfuscatedDataB64.substring(0,20)}...`);
+
+                    logMessages.push(`[BACKEND_SIM_INFO] Генерація стейджера (Метаморфізм: ${params.enable_stager_metamorphism}, Ухилення: ${params.enable_evasion_checks})...`);
+                    
+                    let stagerCodeLines = [
+                        `# SYNTAX Conceptual Stager (Backend Sim v2.5) - ${new Date().toISOString()}`,
+                        `# Archetype: ${params.payload_archetype}`,
+                        `OBFUSCATED_DATA_B64 = "${obfuscatedDataB64}"`,
+                        `OBFUSCATION_KEY = "${key}"`,
+                        `METAMORPHISM_ENABLED = ${params.enable_stager_metamorphism}`,
+                        `EVASION_ENABLED = ${params.enable_evasion_checks}`,
+                        ``,
+                        `# Імітація логіки Python стейджера`,
+                        `def xor_decode_sim(b64_data, key_str):`,
+                        `    decoded_data = atob(b64_data)`,
+                        `    original_chars = []`,
+                        `    for i in range(len(decoded_data)):`,
+                        `        original_chars.append(String.fromCharCode(decoded_data.charCodeAt(i) ^ key_str.charCodeAt(i % key_str.length)))`,
+                        `    return "".join(original_chars)`,
+                        ``,
+                        `def run_payload_logic_sim(decoded_content, archetype):`,
+                        `    print(f"[STAGER_CONCEPT ({{archetype}})] Деобфускований вміст: {{decoded_content}}")`,
+                        `    if archetype == "demo_c2_beacon_payload":`,
+                        `        print("[STAGER_CONCEPT] ...імітація надсилання маячка та отримання завдання 'run_advanced_scan'...")`,
+                        ``,
+                        `print("[STAGER_CONCEPT] Запуск імітованого стейджера...")`,
+                        `payload_content_sim = xor_decode_sim(OBFUSCATED_DATA_B64, OBFUSCATION_KEY)`,
+                        `if payload_content_sim is not None: run_payload_logic_sim(payload_content_sim, "${params.payload_archetype}")`
+                    ];
+                    
+                    let stagerCodeRaw = stagerCodeLines.join("\n");
+
+                    if (params.enable_stager_metamorphism) {
+                        logMessages.push(`[BACKEND_SIM_INFO] Застосування розширеного метаморфізму (включаючи CFO)...`);
+                        stagerCodeRaw = applyCFO_JS(stagerCodeLines).trim(); // Застосовуємо оновлену CFO
+                        // Імітація інших метаморфних технік
+                        stagerCodeRaw = stagerCodeRaw.replace(/xor_decode_sim/g, `decode_internal_${Math.random().toString(36).substring(2,8)}`);
+                        stagerCodeRaw = stagerCodeRaw.replace(/run_payload_logic_sim/g, `execute_core_${Math.random().toString(36).substring(2,8)}`);
+                        logMessages.push(`[BACKEND_SIM_INFO] Метаморфізм застосовано.`);
+                    }
+                     if (params.enable_evasion_checks) {
+                         logMessages.push(`[BACKEND_SIM_INFO] Додавання перевірок ухилення (імітація)...`);
+                         stagerCodeRaw = `print("[EVASION_CHECK_SIM] Перевірка середовища... Усі системи в нормі (імітація).")\n` + stagerCodeRaw;
+                    }
+
+                    let finalStagerOutput = stagerCodeRaw;
+                    if (params.output_format === "base64_encoded_stager") {
+                        finalStagerOutput = btoa(stagerCodeRaw);
+                        logMessages.push(`[BACKEND_SIM_INFO] Стейджер закодовано в Base64.`);
+                    }
+                    
+                    logMessages.push(`[BACKEND_SIM_INFO] Генерацію пейлоада на сервері завершено.`);
+                    resolve({ success: true, stagerCode: finalStagerOutput, generationLog: logMessages.join("\n") });
+
+                } catch (e) {
+                    reject({ success: false, error: e.message, generationLog: (logMessages.join("\n") || "") + `\n[BACKEND_SIM_ERROR] ${e.message}` });
+                }
+            }, 1500); 
+        });
+    }
+
 
     // --- Логіка для Модуля Розвідки (без змін) ---
     const reconForm = document.getElementById('reconForm');
