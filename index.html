@@ -8,7 +8,7 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         .tab-button {
-            padding: 0.75rem 1.0rem; /* Ще трохи зменшено padding для 4 табів */
+            padding: 0.75rem 1.0rem; 
             cursor: pointer;
             border-bottom: 2px solid transparent;
             transition: all 0.3s ease;
@@ -87,7 +87,7 @@
             font-family: 'Courier New', Courier, monospace;
             white-space: pre-wrap;
             word-wrap: break-word;
-            max-height: 250px; /* Ще трохи зменшено висоту для балансу */
+            max-height: 250px; 
             overflow-y: auto;
             border: 1px solid #374151; /* gray-700 */
         }
@@ -126,7 +126,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-3xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.1.GUI</p>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.2.GUI</p>
         </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
@@ -264,16 +264,21 @@
                                     <option value="getsysinfo">Отримати Інформацію про Систему</option>
                                     <option value="listdir">Перелік Директорії</option>
                                     <option value="exec">Виконати Команду (Імітація)</option>
+                                    <option value="exfiltrate_file_concept">Ексфільтрація Файлу (Концепт)</option>
                                 </select>
                             </div>
-                            <div id="c2TaskParamsContainer">
-                                <div id="params_listdir" class="hidden">
-                                     <label for="c2ListdirPath" class="text-gray-300">Шлях до Директорії:</label>
+                            <div id="c2TaskParamsContainer" class="space-y-3">
+                                <div id="params_listdir_c2" class="hidden"> <label for="c2ListdirPath" class="text-gray-300">Шлях до Директорії:</label>
                                      <input type="text" id="c2ListdirPath" name="listdir_path" placeholder="напр. /tmp або C:\\Users" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
                                 </div>
-                                <div id="params_exec" class="hidden">
-                                     <label for="c2ExecCommand" class="text-gray-300">Команда для Виконання:</label>
+                                <div id="params_exec_c2" class="hidden"> <label for="c2ExecCommand" class="text-gray-300">Команда для Виконання:</label>
                                      <input type="text" id="c2ExecCommand" name="exec_command" placeholder="напр. whoami або ls -la" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                </div>
+                                <div id="params_exfiltrate_file_concept" class="hidden">
+                                     <label for="c2ExfilFile" class="text-gray-300">Ім'я Файлу для Ексфільтрації:</label>
+                                     <input type="text" id="c2ExfilFile" name="exfil_file" placeholder="напр. secret.docx" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                     <small class="text-gray-400 text-xs">Введіть ім'я файлу або оберіть зі списку після 'listdir'.</small>
+                                     <div id="c2ExfilFileSuggestions" class="mt-2 max-h-32 overflow-y-auto"></div>
                                 </div>
                             </div>
                             <div class="pt-2">
@@ -303,55 +308,35 @@
                         </div>
                     <button id="refreshLogsButton" class="mt-3 bg-lime-600 hover:bg-lime-700 text-sm py-2 px-3">Оновити Логи (Імітація)</button>
                 </div>
-
                 <div>
                     <h3 class="text-lg font-semibold mb-3 text-gray-300">Статистика Ефективності (Імітація):</h3>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-700/50 rounded-lg border border-gray-600">
-                        <div>
-                            <p class="text-gray-400">Успішних проникнень:</p>
-                            <p id="statsSuccessRate" class="text-2xl font-bold text-green-400">75%</p>
-                        </div>
-                        <div>
-                            <p class="text-gray-400">Частота виявлення (середня):</p>
-                            <p id="statsDetectionRate" class="text-2xl font-bold text-yellow-400">15%</p>
-                        </div>
-                        <div>
-                            <p class="text-gray-400">Найефективніший архетип:</p>
-                            <p id="statsBestArchetype" class="text-xl font-semibold text-lime-300">demo_c2_beacon</p>
-                        </div>
-                         <div>
-                            <p class="text-gray-400">Кількість активних імплантів:</p>
-                            <p id="statsActiveImplants" class="text-2xl font-bold text-sky-400">5</p>
-                        </div>
+                        <div><p class="text-gray-400">Успішних проникнень:</p><p id="statsSuccessRate" class="text-2xl font-bold text-green-400">75%</p></div>
+                        <div><p class="text-gray-400">Частота виявлення (середня):</p><p id="statsDetectionRate" class="text-2xl font-bold text-yellow-400">15%</p></div>
+                        <div><p class="text-gray-400">Найефективніший архетип:</p><p id="statsBestArchetype" class="text-xl font-semibold text-lime-300">demo_c2_beacon</p></div>
+                         <div><p class="text-gray-400">Кількість активних імплантів:</p><p id="statsActiveImplants" class="text-2xl font-bold text-sky-400">5</p></div>
                     </div>
                 </div>
-
                 <div>
                     <h3 class="text-lg font-semibold mb-3 text-gray-300">Адаптація Правил Фреймворку (Концепт):</h3>
                     <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-3">
-                        <p class="text-gray-400">Тут міг би бути інтерфейс для оновлення правил генерації пейлоадів, пріоритезації технік ухилення на основі аналізу логів та статистики.</p>
-                        <label class="checkbox-label text-gray-300">
-                            <input type="checkbox" id="autoAdaptRules" name="auto_adapt_rules" class="form-checkbox">
-                            Увімкнути автоматичну адаптацію правил (Імітація)
-                        </label>
+                        <p class="text-gray-400">Тут міг би бути інтерфейс для оновлення правил генерації пейлоадів...</p>
+                        <label class="checkbox-label text-gray-300"><input type="checkbox" id="autoAdaptRules" name="auto_adapt_rules" class="form-checkbox">Увімкнути автоматичну адаптацію правил (Імітація)</label>
                         <button id="applyRuleChangesButton" class="bg-lime-600 hover:bg-lime-700">Застосувати Зміни Правил (Імітація)</button>
                     </div>
                 </div>
             </div>
         </div>
-
     </div>
 
 <script>
     // --- Загальна логіка для табів (без змін) ---
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
-
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
             tabButtons.forEach(btn => btn.classList.remove('active'));
             button.classList.add('active');
-            
             tabContents.forEach(content => content.classList.remove('active'));
             document.getElementById(button.dataset.tab).classList.add('active');
         });
@@ -360,7 +345,6 @@
     // --- Логіка для Генератора Пейлоадів (без змін) ---
     const payloadForm = document.getElementById('payloadGeneratorForm');
     const payloadArchetypeSelect = document.getElementById('payloadArchetype');
-    // ... (решта коду для генератора пейлоадів з версії 2.0.GUI без змін) ...
     const payloadArchetypeParamsContainer = document.getElementById('archetypeParamsContainer');
     const payloadOutputSection = document.getElementById('payloadOutputSection');
     const payloadStagerOutput = document.getElementById('payloadStagerOutput');
@@ -379,7 +363,7 @@
         "c2_target_port": { requiredIf: "demo_c2_beacon_payload", isPort: true, idPrefix: "c2TargetPort" },
         "obfuscation_key": { required: true, minLength: 5, idPrefix: "obfuscationKey" }
     };
-    if(payloadArchetypeSelect) { // Перевірка наявності елемента
+    if(payloadArchetypeSelect) {
         payloadArchetypeSelect.addEventListener('change', function() {
             const selectedArchetype = this.value;
             payloadGenerationLog.textContent = ''; 
@@ -431,7 +415,7 @@
         }
         return isValid;
     }
-    if(payloadForm) { // Перевірка наявності елемента
+    if(payloadForm) {
         payloadForm.addEventListener('submit', function(event) {
             event.preventDefault();
             generatePayloadButton.disabled = true; generatePayloadButton.textContent = 'Генерація...';
@@ -463,7 +447,7 @@
                     const obfuscatedDataB64 = btoa(obfuscatedData);
                     payloadGenerationLog.textContent += `[OBFUSCATOR_SUCCESS] Дані обфусковано.\n`;
                     payloadGenerationLog.textContent += `[STAGER_GENERATOR_INFO] Генерація стейджера типу '${params.payload_archetype}' (Метаморфізм: ${params.enable_stager_metamorphism}, Ухилення: ${params.enable_evasion_checks}, Формат: ${params.output_format})...\n`;
-                    let stagerCodeRaw = `# SYNTAX Conceptual Stager (GUI Demo v2.1) - ${new Date().toISOString()}\n`;
+                    let stagerCodeRaw = `# SYNTAX Conceptual Stager (GUI Demo v2.2) - ${new Date().toISOString()}\n`;
                     stagerCodeRaw += `# Archetype: ${params.payload_archetype}\nOBFUSCATED_DATA_B64 = "${obfuscatedDataB64}"\nOBFUSCATION_KEY = "${key}"\n`;
                     stagerCodeRaw += `METAMORPHISM_ENABLED = ${params.enable_stager_metamorphism}\nEVASION_ENABLED = ${params.enable_evasion_checks}\n\nprint("[STAGER_CONCEPT] Запуск імітованого стейджера...")\n`;
                     let finalStagerOutput = stagerCodeRaw;
@@ -486,11 +470,9 @@
     }
     if (payloadArchetypeSelect) payloadArchetypeSelect.dispatchEvent(new Event('change'));
 
-
     // --- Логіка для Модуля Розвідки (без змін) ---
     const reconForm = document.getElementById('reconForm');
     const reconTargetInput = document.getElementById('reconTarget');
-    // ... (решта коду для розвідки з версії 2.0.GUI без змін) ...
     const reconTypeSelect = document.getElementById('reconType');
     const startReconButton = document.getElementById('startReconButton');
     const reconOutputSection = document.getElementById('reconOutputSection');
@@ -552,10 +534,9 @@
         return services[port] || "Unknown";
     }
 
-    // --- Логіка для C2 Управління (без змін) ---
+    // --- Оновлена Логіка для C2 Управління ---
     const c2ControlTab = document.getElementById('c2ControlTab');
     const implantListDiv = document.getElementById('implantList');
-    // ... (решта коду для C2 з версії 2.0.GUI без змін) ...
     const selectedImplantSection = document.getElementById('selectedImplantSection');
     const c2NoImplantSelectedDiv = document.getElementById('c2NoImplantSelected');
     const selectedImplantIdSpan = document.getElementById('selectedImplantId');
@@ -564,19 +545,23 @@
     const c2TaskParamsContainer = document.getElementById('c2TaskParamsContainer');
     const c2ResultsOutput = document.getElementById('c2ResultsOutput');
     const sendTaskButton = document.getElementById('sendTaskButton');
+    const c2ExfilFileSuggestionsDiv = document.getElementById('c2ExfilFileSuggestions');
+
+
     let simulatedImplants = [];
     let selectedImplant = null;
+    let lastListdirResults = []; // Зберігати результати listdir
 
     function generateSimulatedImplants() {
         simulatedImplants = [];
-        const osTypes = ["Windows_x64", "Linux_x64", "Windows_x86"];
-        const baseIP = "192.168.1.";
-        for (let i = 0; i < 5; i++) {
-            const id = `SYNIMPLNT-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-            const ip = baseIP + (100 + i);
+        const osTypes = ["Windows_x64", "Linux_x64", "Windows_x86", "macOS_arm64"];
+        const baseIP = "10.0.";
+        for (let i = 0; i < Math.floor(Math.random()*3) + 3; i++) { // 3-5 імплантів
+            const id = `SYNIMPLNT-${Math.random().toString(16).substring(2, 10).toUpperCase()}`;
+            const ip = baseIP + Math.floor(Math.random()*255) + "." + (Math.floor(Math.random()*250)+2);
             const os = osTypes[Math.floor(Math.random() * osTypes.length)];
-            const lastSeen = new Date(Date.now() - Math.random() * 1000 * 60 * 60).toLocaleString();
-            simulatedImplants.push({ id, ip, os, lastSeen });
+            const lastSeen = new Date(Date.now() - Math.random() * 1000 * 60 * 60 * 2).toLocaleString(); // Останні 2 години
+            simulatedImplants.push({ id, ip, os, lastSeen, files: [] }); // Додаємо поле files
         }
     }
     function renderImplantList() {
@@ -602,22 +587,55 @@
         renderImplantList(); 
         updateC2TaskParams(); 
         logToC2Output(`Обрано імплант: ${implant.id} (${implant.ip})`);
+        // Очистити попередні пропозиції файлів
+        if (c2ExfilFileSuggestionsDiv) c2ExfilFileSuggestionsDiv.innerHTML = ''; 
+        document.getElementById('c2ExfilFile').value = ''; // Очистити поле вводу
     }
+
     function updateC2TaskParams() {
         if(!c2TaskTypeSelect) return;
         const taskType = c2TaskTypeSelect.value;
-        document.getElementById('params_listdir').classList.add('hidden');
-        document.getElementById('params_exec').classList.add('hidden');
-        if (taskType === 'listdir') document.getElementById('params_listdir').classList.remove('hidden');
-        else if (taskType === 'exec') document.getElementById('params_exec').classList.remove('hidden');
+        document.getElementById('params_listdir_c2').classList.add('hidden');
+        document.getElementById('params_exec_c2').classList.add('hidden');
+        document.getElementById('params_exfiltrate_file_concept').classList.add('hidden');
+
+        if (taskType === 'listdir') {
+            document.getElementById('params_listdir_c2').classList.remove('hidden');
+        } else if (taskType === 'exec') {
+            document.getElementById('params_exec_c2').classList.remove('hidden');
+        } else if (taskType === 'exfiltrate_file_concept') {
+            document.getElementById('params_exfiltrate_file_concept').classList.remove('hidden');
+            renderFileSuggestionsForExfil();
+        }
     }
+    
+    function renderFileSuggestionsForExfil() {
+        if (!c2ExfilFileSuggestionsDiv || !selectedImplant || selectedImplant.files.length === 0) {
+            if(c2ExfilFileSuggestionsDiv) c2ExfilFileSuggestionsDiv.innerHTML = '<p class="text-xs text-gray-500">Спочатку виконайте \'listdir\', щоб побачити файли.</p>';
+            return;
+        }
+        c2ExfilFileSuggestionsDiv.innerHTML = '<p class="text-xs text-gray-400 mb-1">Оберіть файл зі списку (результат listdir):</p>';
+        selectedImplant.files.forEach(file => {
+            const fileButton = document.createElement('button');
+            fileButton.textContent = file;
+            fileButton.type = 'button'; // Важливо, щоб не сабмітити форму
+            fileButton.className = 'text-xs bg-gray-600 hover:bg-gray-500 text-gray-200 py-1 px-2 rounded mr-1 mb-1';
+            fileButton.onclick = () => {
+                document.getElementById('c2ExfilFile').value = file;
+            };
+            c2ExfilFileSuggestionsDiv.appendChild(fileButton);
+        });
+    }
+
     if(c2TaskTypeSelect) c2TaskTypeSelect.addEventListener('change', updateC2TaskParams);
+
     function logToC2Output(message) {
         if(!c2ResultsOutput) return;
         const timestamp = new Date().toLocaleTimeString();
         c2ResultsOutput.innerHTML += `[${timestamp}] ${message}\n`;
         c2ResultsOutput.scrollTop = c2ResultsOutput.scrollHeight;
     }
+
     if(c2TaskForm) {
         c2TaskForm.addEventListener('submit', function(event) {
             event.preventDefault();
@@ -627,13 +645,35 @@
             let taskParams = "";
             if (taskType === 'listdir') taskParams = document.getElementById('c2ListdirPath').value || ".";
             else if (taskType === 'exec') taskParams = document.getElementById('c2ExecCommand').value || "whoami";
+            else if (taskType === 'exfiltrate_file_concept') taskParams = document.getElementById('c2ExfilFile').value;
+            
+            if (taskType === 'exfiltrate_file_concept' && !taskParams) {
+                 logToC2Output("[C2_ERROR] Для ексфільтрації потрібно вказати ім'я файлу.");
+                 sendTaskButton.disabled = false; sendTaskButton.textContent = 'Надіслати Завдання';
+                 return;
+            }
+
             logToC2Output(`[C2_TASK_SENT] Надсилання завдання '${taskType}' з параметрами '${taskParams}' на імплант ${selectedImplant.id}...`);
+            
             setTimeout(() => {
                 try {
                     let taskResult = `Результат завдання '${taskType}' для ${selectedImplant.id}:\n`;
-                    if (taskType === 'getsysinfo') taskResult += `  OS: ${selectedImplant.os}\n  IP: ${selectedImplant.ip}\n  User: SimulatedUser\n  Hostname: ${selectedImplant.id.replace("SYNIMPLNT-","HOST-")}`;
-                    else if (taskType === 'listdir') taskResult += `  Перелік для '${taskParams}':\n    - fileA.txt\n    - important_doc.docx\n    - (імітація)`;
-                    else if (taskType === 'exec') taskResult += `  Виконання '${taskParams}':\n    Команда виконана успішно (імітація).\n    Вивід: ... (дані з '${taskParams}') ...`;
+                    if (taskType === 'getsysinfo') {
+                        taskResult += `  OS: ${selectedImplant.os}\n  IP: ${selectedImplant.ip}\n  User: SimulatedUser\n  Hostname: ${selectedImplant.id.replace("SYNIMPLNT-","HOST-")}`;
+                    } else if (taskType === 'listdir') {
+                        const simulatedFiles = ["config.ini", "user_data.db", "passwords.txt.bak", "project_alpha/", "notes.md"];
+                        selectedImplant.files = simulatedFiles.filter(() => Math.random() > 0.3); // Зберігаємо деякі файли
+                        taskResult += `  Перелік для '${taskParams}':\n    ${selectedImplant.files.join("\n    ") || "(порожньо)"}`;
+                        renderFileSuggestionsForExfil(); // Оновлюємо пропозиції для ексфільтрації
+                    } else if (taskType === 'exec') {
+                        taskResult += `  Виконання '${taskParams}':\n    Команда виконана успішно (імітація).\n    Вивід: ... (дані з '${taskParams}') ...`;
+                    } else if (taskType === 'exfiltrate_file_concept') {
+                        if (selectedImplant.files.includes(taskParams) || Math.random() > 0.2) { // Імітуємо успіх, якщо файл є або випадково
+                            taskResult += `  Ексфільтрація файлу '${taskParams}':\n    [Chunk 1/3] 33% ...\n    [Chunk 2/3] 66% ...\n    [Chunk 3/3] 100% ...\n    Файл '${taskParams}' успішно ексфільтровано (імітація).`;
+                        } else {
+                            taskResult += `  Ексфільтрація файлу '${taskParams}':\n    ПОМИЛКА: Файл не знайдено або доступ заборонено (імітація).`;
+                        }
+                    }
                     logToC2Output(`[C2_TASK_RESULT] ${taskResult}`);
                 } catch(e) {
                     logToC2Output(`[C2_TASK_ERROR] Помилка імітації завдання: ${e.message}`);
@@ -643,27 +683,28 @@
             }, 1000);
         });
     }
-    if(c2ControlTab) { // Ініціалізація C2 вкладки, якщо вона існує
+    if(c2ControlTab) { 
         generateSimulatedImplants();
         renderImplantList();
         updateC2TaskParams(); 
         if (c2ResultsOutput) c2ResultsOutput.textContent = "Очікування команд...\n";
     }
 
-    // --- Нова Логіка для Вкладки Логування та Адаптації ---
+    // --- Логіка для Вкладки Логування та Адаптації (без змін) ---
     const loggingAdaptationTab = document.getElementById('loggingAdaptationTab');
     const aggregatedLogsOutput = document.getElementById('aggregatedLogsOutput');
+    // ... (решта коду для логування з версії 2.1.GUI без змін) ...
     const refreshLogsButton = document.getElementById('refreshLogsButton');
     const statsSuccessRate = document.getElementById('statsSuccessRate');
     const statsDetectionRate = document.getElementById('statsDetectionRate');
     const statsBestArchetype = document.getElementById('statsBestArchetype');
-    const statsActiveImplants = document.getElementById('statsActiveImplants'); // Новий елемент статистики
+    const statsActiveImplants = document.getElementById('statsActiveImplants'); 
     const autoAdaptRulesCheckbox = document.getElementById('autoAdaptRules');
     const applyRuleChangesButton = document.getElementById('applyRuleChangesButton');
 
     function generateSimulatedLogs() {
         if (!aggregatedLogsOutput) return;
-        aggregatedLogsOutput.innerHTML = ''; // Очистити попередні логи
+        aggregatedLogsOutput.innerHTML = ''; 
         const logLevels = ["INFO", "WARN", "ERROR", "SUCCESS"];
         const components = ["PayloadGen", "Recon", "C2_Implant_Alpha", "C2_Implant_Beta", "FrameworkCore"];
         const messages = [
@@ -672,25 +713,22 @@
             "Ексфільтрація даних: chunk 1/5.", "Виявлено підозрілу активність EDR.",
             "Правило метаморфізму #123 оновлено.", "Імплант перейшов у сплячий режим."
         ];
-        for (let i = 0; i < 15; i++) { // Генеруємо 15 імітованих записів логу
+        for (let i = 0; i < 15; i++) { 
             const level = logLevels[Math.floor(Math.random() * logLevels.length)];
             const component = components[Math.floor(Math.random() * components.length)];
             const message = messages[Math.floor(Math.random() * messages.length)];
-            const timestamp = new Date(Date.now() - Math.random() * 1000 * 60 * 30).toLocaleTimeString(); // Останні 30 хв
-            
+            const timestamp = new Date(Date.now() - Math.random() * 1000 * 60 * 30).toLocaleTimeString(); 
             const logEntryDiv = document.createElement('div');
             logEntryDiv.className = 'log-entry';
             let logClass = 'log-info';
             if (level === "WARN") logClass = 'log-warning';
             else if (level === "ERROR") logClass = 'log-error';
             else if (level === "SUCCESS") logClass = 'log-success';
-            
             logEntryDiv.innerHTML = `<span class="font-mono text-xs ${logClass}">[${timestamp}][${level}][${component}]</span> ${message}`;
             aggregatedLogsOutput.appendChild(logEntryDiv);
         }
         aggregatedLogsOutput.scrollTop = aggregatedLogsOutput.scrollHeight;
     }
-
     function updateSimulatedStats() {
         if (statsSuccessRate) statsSuccessRate.textContent = `${(60 + Math.random() * 30).toFixed(0)}%`;
         if (statsDetectionRate) statsDetectionRate.textContent = `${(5 + Math.random() * 20).toFixed(0)}%`;
@@ -698,9 +736,8 @@
             const archetypes = ["demo_c2_beacon_payload", "demo_echo_payload", "custom_https_stager"];
             statsBestArchetype.textContent = archetypes[Math.floor(Math.random() * archetypes.length)];
         }
-        if (statsActiveImplants) statsActiveImplants.textContent = simulatedImplants.length.toString(); // Використовуємо реальну кількість імітованих імплантів
+        if (statsActiveImplants) statsActiveImplants.textContent = simulatedImplants.length.toString(); 
     }
-    
     if (refreshLogsButton) {
         refreshLogsButton.addEventListener('click', () => {
             logToLoggingOutput("Імітація оновлення логів...");
@@ -709,52 +746,42 @@
             logToLoggingOutput("Логи та статистика оновлені (імітація).");
         });
     }
-
     if (applyRuleChangesButton) {
         applyRuleChangesButton.addEventListener('click', () => {
             const autoAdapt = autoAdaptRulesCheckbox.checked;
             logToLoggingOutput(`Імітація застосування змін правил... (Автоматична адаптація: ${autoAdapt})`);
-            // Тут могла б бути логіка взаємодії з backend для оновлення правил
             setTimeout(() => {
                  logToLoggingOutput("Правила (начебто) оновлено.");
             }, 500);
         });
     }
-    
-    function logToLoggingOutput(message) { // Окрема функція для логування дій на цій вкладці
-        if (!aggregatedLogsOutput) return; // Якщо елемент не існує на поточній (неактивній) вкладці
+    function logToLoggingOutput(message) { 
+        if (!aggregatedLogsOutput) return; 
         const timestamp = new Date().toLocaleTimeString();
         const logEntryDiv = document.createElement('div');
-        logEntryDiv.className = 'log-entry log-info'; // За замовчуванням інформаційний
+        logEntryDiv.className = 'log-entry log-info'; 
         logEntryDiv.innerHTML = `<span class="font-mono text-xs">[${timestamp}][GUI_LOG]</span> ${message}`;
-        aggregatedLogsOutput.insertBefore(logEntryDiv, aggregatedLogsOutput.firstChild); // Додаємо на початок
+        aggregatedLogsOutput.insertBefore(logEntryDiv, aggregatedLogsOutput.firstChild); 
     }
-
-
-    // Ініціалізація вкладки Логування та Адаптації, якщо вона активна при завантаженні
-    // або при першому перемиканні на неї
     const loggingTabObserver = new MutationObserver((mutationsList, observer) => {
         for(const mutation of mutationsList) {
             if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-                if (loggingAdaptationTab.classList.contains('active')) {
-                    if (!aggregatedLogsOutput.hasChildNodes()) { // Завантажуємо логи лише раз при першому відкритті
+                if (loggingAdaptationTab && loggingAdaptationTab.classList.contains('active')) {
+                    if (!aggregatedLogsOutput.hasChildNodes()) { 
                         generateSimulatedLogs();
                         updateSimulatedStats();
                     }
-                   // observer.disconnect(); // Можна відключити спостерігач, якщо потрібно лише одноразове завантаження
                 }
             }
         }
     });
-    if (loggingAdaptationTab) { // Перевірка наявності елемента
+    if (loggingAdaptationTab) { 
          loggingTabObserver.observe(loggingAdaptationTab, { attributes: true });
-         // Початкове завантаження, якщо вкладка активна за замовчуванням (не в нашому випадку, але для повноти)
-         if (loggingAdaptationTab.classList.contains('active') && !aggregatedLogsOutput.hasChildNodes()) {
+         if (loggingAdaptationTab.classList.contains('active') && aggregatedLogsOutput && !aggregatedLogsOutput.hasChildNodes()) {
             generateSimulatedLogs();
             updateSimulatedStats();
          }
     }
-
 
 </script>
 </body>
