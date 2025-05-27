@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syntax Framework - Контрольна Панель (Концепт)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .tab-button {
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        .tab-button.active {
+            border-color: #6366F1; /* indigo-500 */
+            color: #A5B4FC; /* indigo-300 */
+        }
+        .tab-button:hover {
+            background-color: rgba(99, 102, 241, 0.1);
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .form-section { transition: all 0.3s ease-in-out; }
+        .form-section.hidden { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #4B5563; /* gray-600 */
+            border-radius: 0.375rem; /* rounded-md */
+            background-color: #374151; /* gray-700 */
+            color: #F3F4F6; /* gray-100 */
+            box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+            outline: 2px solid transparent;
+            outline-offset: 2px;
+            border-color: #6366F1; /* indigo-500 */
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); 
+        }
+        .checkbox-label { display: flex; align-items: center; margin-bottom: 0.5rem; }
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 0.5rem;
+            height: 1rem;
+            width: 1rem;
+            border-radius: 0.25rem; 
+            border-color: #4B5563; /* gray-600 */
+            background-color: #374151; /* gray-700 */
+            color: #6366F1; 
+        }
+        .checkbox-label input[type="checkbox"]:focus {
+            ring: 2px;
+            ring-offset: 2px;
+            ring-color: #818CF8; 
+        }
+        button {
+            background-color: #4F46E5; 
+            color: white;
+            font-weight: 600;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.375rem; 
+            transition: background-color 0.15s ease-in-out;
+        }
+        button:hover {
+            background-color: #4338CA; 
+        }
+        button:disabled {
+            background-color: #6B7280; /* gray-500 */
+            cursor: not-allowed;
+        }
+        .output-area {
+            background-color: #111827; /* gray-900 */
+            color: #D1D5DB; /* gray-300 */
+            padding: 1rem;
+            border-radius: 0.375rem; 
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #374151; /* gray-700 */
+        }
+        .error-message {
+            color: #F87171; /* red-400 */
+            font-size: 0.875rem; 
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-black text-gray-200 min-h-screen flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
+
+    <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-3xl border border-gray-700">
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v1.9.GUI</p>
+        </header>
+
+        <div class="mb-6 border-b border-gray-700 flex">
+            <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
+            <button class="tab-button" data-tab="reconnaissanceTab">Розвідка</button>
+            </div>
+
+        <div id="payloadGeneratorTab" class="tab-content active">
+            <h2 class="text-2xl font-semibold mb-4 text-indigo-300">Конфігурація Пейлоада</h2>
+            <form id="payloadGeneratorForm" class="space-y-6">
+                <div>
+                    <label for="payloadArchetype" class="text-gray-300">Архетип Пейлоада:</label>
+                    <select id="payloadArchetype" name="payload_archetype" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="">-- Оберіть архетип --</option>
+                        <option value="demo_echo_payload">Демо: Ехо-Пейлоад</option>
+                        <option value="demo_file_lister_payload">Демо: Перелік Файлів</option>
+                        <option value="demo_c2_beacon_payload">Демо: C2 Маячок</option>
+                    </select>
+                    <div id="error-payloadArchetype" class="error-message"></div>
+                </div>
+
+                <div id="archetypeParamsContainer" class="space-y-4">
+                    <div id="params_demo_echo_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-400">Параметри Ехо-Пейлоада</h3>
+                        <div>
+                            <label for="messageToEcho" class="text-gray-300">Повідомлення для Ехо:</label>
+                            <input type="text" id="messageToEcho" name="message_to_echo" placeholder="Введіть повідомлення" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-messageToEcho" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_demo_file_lister_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-400">Параметри Переліку Файлів</h3>
+                        <div>
+                            <label for="directoryToList" class="text-gray-300">Директорія для Переліку (за замовч. '.'):</label>
+                            <input type="text" id="directoryToList" name="directory_to_list" placeholder="." class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-directoryToList" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_demo_c2_beacon_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-400">Параметри C2 Маячка</h3>
+                        <div>
+                            <label for="c2TargetHost" class="text-gray-300">Хост C2 (IP або домен):</label>
+                            <input type="text" id="c2TargetHost" name="c2_target_host" placeholder="напр. 192.168.1.100 або c2.example.com" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-c2TargetHost" class="error-message"></div>
+                        </div>
+                        <div class="mt-4">
+                            <label for="c2TargetPort" class="text-gray-300">Порт C2 (1-65535):</label>
+                            <input type="number" id="c2TargetPort" name="c2_target_port" placeholder="напр. 8080" min="1" max="65535" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-c2TargetPort" class="error-message"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                    <h3 class="text-lg font-semibold mb-3 text-indigo-400">Загальні Налаштування Пейлоада</h3>
+                    <div>
+                        <label for="obfuscationKey" class="text-gray-300">Ключ Обфускації (мін. 5 символів):</label>
+                        <input type="text" id="obfuscationKey" name="obfuscation_key" placeholder="Введіть ключ" value="DefaultFrameworkKey" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                        <div id="error-obfuscationKey" class="error-message"></div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="outputFormat" class="text-gray-300">Формат Виводу Стейджера:</label>
+                            <select id="outputFormat" name="output_format" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="raw_python_stager">Raw Python Стейджер</option>
+                                <option value="base64_encoded_stager">Base64 Кодований Стейджер</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-gray-300 mb-2">Опції Генерації Пейлоада:</label>
+                            <div class="space-y-2">
+                                <label class="checkbox-label text-gray-300">
+                                    <input type="checkbox" id="enableStagerMetamorphism" name="enable_stager_metamorphism" checked class="form-checkbox">
+                                    Увімкнути Метаморфізм Стейджера
+                                </label>
+                                <label class="checkbox-label text-gray-300">
+                                    <input type="checkbox" id="enableEvasionChecks" name="enable_evasion_checks" checked class="form-checkbox">
+                                    Увімкнути Перевірки Ухилення
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="pt-2">
+                    <button type="submit" id="generatePayloadButton" class="w-full">Згенерувати Пейлоад</button>
+                </div>
+            </form>
+            <div id="payloadOutputSection" class="mt-8 hidden">
+                <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">Згенерований Стейджер:</h3>
+                <div id="payloadStagerOutput" class="output-area"></div>
+                <div id="payloadGenerationLog" class="mt-4 text-sm text-gray-400"></div>
+            </div>
+        </div>
+
+        <div id="reconnaissanceTab" class="tab-content">
+            <h2 class="text-2xl font-semibold mb-4 text-teal-300">Модуль Розвідки</h2>
+            <form id="reconForm" class="space-y-6">
+                <div>
+                    <label for="reconTarget" class="text-gray-300">Ціль для Розвідки (IP або Домен):</label>
+                    <input type="text" id="reconTarget" name="recon_target" placeholder="напр. example.com або 192.168.1.1" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400">
+                     <div id="error-reconTarget" class="error-message"></div>
+                </div>
+                <div>
+                    <label for="reconType" class="text-gray-300">Тип Розвідки:</label>
+                    <select id="reconType" name="recon_type" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-teal-500 focus:border-teal-500">
+                        <option value="port_scan_basic">Сканування Портів (Базове)</option>
+                        <option value="osint_email_search">Пошук Email (OSINT Імітація)</option>
+                    </select>
+                </div>
+                 <div class="pt-2">
+                    <button type="submit" id="startReconButton" class="w-full bg-teal-600 hover:bg-teal-700">Запустити Розвідку</button>
+                </div>
+            </form>
+            <div id="reconOutputSection" class="mt-8 hidden">
+                <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">Результати Розвідки:</h3>
+                <div id="reconResultsOutput" class="output-area"></div>
+                <div id="reconLog" class="mt-4 text-sm text-gray-400"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- Загальна логіка для табів ---
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            
+            tabContents.forEach(content => content.classList.remove('active'));
+            document.getElementById(button.dataset.tab).classList.add('active');
+        });
+    });
+
+    // --- Логіка для Генератора Пейлоадів (з попередньої версії, адаптована) ---
+    const payloadForm = document.getElementById('payloadGeneratorForm');
+    const payloadArchetypeSelect = document.getElementById('payloadArchetype');
+    const payloadArchetypeParamsContainer = document.getElementById('archetypeParamsContainer');
+    const payloadOutputSection = document.getElementById('payloadOutputSection');
+    const payloadStagerOutput = document.getElementById('payloadStagerOutput');
+    const payloadGenerationLog = document.getElementById('payloadGenerationLog');
+    const generatePayloadButton = document.getElementById('generatePayloadButton');
+
+    const payloadParamSections = {
+        "demo_echo_payload": document.getElementById('params_demo_echo_payload'),
+        "demo_file_lister_payload": document.getElementById('params_demo_file_lister_payload'),
+        "demo_c2_beacon_payload": document.getElementById('params_demo_c2_beacon_payload')
+    };
+    
+    const payloadParamSchema = {
+        "payload_archetype": { required: true, idPrefix: "payloadArchetype" },
+        "message_to_echo": { requiredIf: "demo_echo_payload", minLength: 1, idPrefix: "messageToEcho" },
+        "directory_to_list": { requiredIf: "demo_file_lister_payload", isPath: true, idPrefix: "directoryToList" },
+        "c2_target_host": { requiredIf: "demo_c2_beacon_payload", isHost: true, idPrefix: "c2TargetHost" },
+        "c2_target_port": { requiredIf: "demo_c2_beacon_payload", isPort: true, idPrefix: "c2TargetPort" },
+        "obfuscation_key": { required: true, minLength: 5, idPrefix: "obfuscationKey" }
+    };
+
+    payloadArchetypeSelect.addEventListener('change', function() {
+        const selectedArchetype = this.value;
+        payloadGenerationLog.textContent = ''; 
+        payloadOutputSection.classList.add('hidden');
+
+        Object.values(payloadParamSections).forEach(section => {
+            if (section) section.classList.add('hidden');
+        });
+
+        if (selectedArchetype && payloadParamSections[selectedArchetype]) {
+            payloadParamSections[selectedArchetype].classList.remove('hidden');
+        }
+        clearPayloadErrors();
+    });
+
+    function clearPayloadErrors() {
+        document.querySelectorAll('#payloadGeneratorForm .error-message').forEach(el => el.textContent = '');
+    }
+
+    function displayPayloadError(fieldIdPrefix, message) {
+        const errorEl = document.getElementById(`error-${fieldIdPrefix}`);
+        if (errorEl) errorEl.textContent = message;
+    }
+
+    function validatePayloadForm(formData) {
+        clearPayloadErrors();
+        let isValid = true;
+        const currentArchetype = formData.get('payload_archetype');
+
+        for (const fieldName in payloadParamSchema) {
+            const rules = payloadParamSchema[fieldName];
+            const value = formData.get(fieldName);
+            let isRequired = rules.required;
+            
+            if (rules.requiredIf && rules.requiredIf === currentArchetype) isRequired = true;
+            else if (rules.requiredIf && rules.requiredIf !== currentArchetype) isRequired = false;
+
+            if (isRequired && (!value || String(value).trim() === '')) {
+                displayPayloadError(rules.idPrefix, `Параметр '${fieldName}' є обов'язковим.`);
+                isValid = false; continue;
+            }
+            
+            if (value) {
+                if (rules.minLength && String(value).length < rules.minLength) {
+                    displayPayloadError(rules.idPrefix, `Мінімальна довжина для '${fieldName}': ${rules.minLength} символів.`);
+                    isValid = false;
+                }
+                if (rules.isHost && !/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$/.test(String(value))) {
+                     displayPayloadError(rules.idPrefix, `Невірний формат для '${fieldName}'. Очікується IP або домен.`);
+                     isValid = false;
+                }
+                if (rules.isPort) {
+                    const portNum = parseInt(String(value), 10);
+                    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                        displayPayloadError(rules.idPrefix, `Порт для '${fieldName}' має бути числом від 1 до 65535.`);
+                        isValid = false;
+                    }
+                }
+            }
+        }
+        return isValid;
+    }
+
+    payloadForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        generatePayloadButton.disabled = true;
+        generatePayloadButton.textContent = 'Генерація...';
+        
+        const formData = new FormData(payloadForm);
+        const params = Object.fromEntries(formData.entries());
+        
+        params.enable_stager_metamorphism = document.getElementById('enableStagerMetamorphism').checked;
+        params.enable_evasion_checks = document.getElementById('enableEvasionChecks').checked;
+
+        if (!validatePayloadForm(formData)) {
+            payloadGenerationLog.textContent = '[VALIDATOR_FAILURE] Будь ласка, виправте помилки у формі.';
+            payloadOutputSection.classList.add('hidden');
+            generatePayloadButton.disabled = false;
+            generatePayloadButton.textContent = 'Згенерувати Пейлоад';
+            return;
+        }
+        
+        payloadGenerationLog.textContent = '[WORKFLOW_INFO] Параметри отримано. Імітація генерації пейлоада...\n';
+        
+        setTimeout(() => {
+            try {
+                payloadGenerationLog.textContent += `[VALIDATOR_SUCCESS] Валідація параметрів для '${params.payload_archetype}' успішна.\n`;
+                payloadGenerationLog.textContent += `[ARCHETYPE_SELECTOR_SUCCESS] Архетип '${params.payload_archetype}' обрано.\n`;
+
+                let dataToObfuscate = "";
+                if (params.payload_archetype === "demo_echo_payload") dataToObfuscate = params.message_to_echo || "Default Echo Message";
+                else if (params.payload_archetype === "demo_file_lister_payload") dataToObfuscate = params.directory_to_list || ".";
+                else if (params.payload_archetype === "demo_c2_beacon_payload") dataToObfuscate = `${params.c2_target_host}:${params.c2_target_port}`;
+                
+                const key = params.obfuscation_key || "DefaultKey";
+                payloadGenerationLog.textContent += `[OBFUSCATOR_INFO] Обфускація даних для '${params.payload_archetype}' з ключем '${key}'...\n`;
+                
+                let obfuscatedData = "";
+                for (let i = 0; i < dataToObfuscate.length; i++) {
+                    obfuscatedData += String.fromCharCode(dataToObfuscate.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+                }
+                const obfuscatedDataB64 = btoa(obfuscatedData);
+                payloadGenerationLog.textContent += `[OBFUSCATOR_SUCCESS] Дані обфусковано.\n`;
+
+                payloadGenerationLog.textContent += `[STAGER_GENERATOR_INFO] Генерація стейджера типу '${params.payload_archetype}' (Метаморфізм: ${params.enable_stager_metamorphism}, Ухилення: ${params.enable_evasion_checks}, Формат: ${params.output_format})...\n`;
+                
+                let stagerCodeRaw = `# SYNTAX Conceptual Stager (GUI Demo v1.9) - ${new Date().toISOString()}\n`;
+                stagerCodeRaw += `# Archetype: ${params.payload_archetype}\n`;
+                stagerCodeRaw += `OBFUSCATED_DATA_B64 = "${obfuscatedDataB64}"\nOBFUSCATION_KEY = "${key}"\n`;
+                stagerCodeRaw += `METAMORPHISM_ENABLED = ${params.enable_stager_metamorphism}\nEVASION_ENABLED = ${params.enable_evasion_checks}\n\n`;
+                stagerCodeRaw += `print("[STAGER_CONCEPT] Запуск імітованого стейджера...")\n`;
+                // ... (тут могла б бути більш детальна імітація коду стейджера)
+
+                let finalStagerOutput = stagerCodeRaw;
+                if (params.output_format === "base64_encoded_stager") {
+                    finalStagerOutput = btoa(stagerCodeRaw);
+                    payloadGenerationLog.textContent += `[STAGER_GENERATOR_INFO] Стейджер закодовано в Base64.\n`;
+                }
+                
+                payloadStagerOutput.textContent = finalStagerOutput;
+                payloadOutputSection.classList.remove('hidden');
+                payloadGenerationLog.textContent += `[WORKFLOW_SUCCESS] Генерацію пейлоада завершено.\n`;
+
+            } catch (e) {
+                payloadGenerationLog.textContent += `[WORKFLOW_FAILURE] Помилка під час генерації пейлоада: ${e.message}\n`;
+                payloadStagerOutput.textContent = `Помилка: ${e.message}`;
+                payloadOutputSection.classList.remove('hidden');
+            } finally {
+                generatePayloadButton.disabled = false;
+                generatePayloadButton.textContent = 'Згенерувати Пейлоад';
+            }
+        }, 700); 
+    });
+    payloadArchetypeSelect.dispatchEvent(new Event('change')); // Ініціалізація
+
+    // --- Логіка для Модуля Розвідки ---
+    const reconForm = document.getElementById('reconForm');
+    const reconTargetInput = document.getElementById('reconTarget');
+    const reconTypeSelect = document.getElementById('reconType');
+    const startReconButton = document.getElementById('startReconButton');
+    const reconOutputSection = document.getElementById('reconOutputSection');
+    const reconResultsOutput = document.getElementById('reconResultsOutput');
+    const reconLog = document.getElementById('reconLog');
+
+    reconForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        startReconButton.disabled = true;
+        startReconButton.textContent = 'Розвідка...';
+        reconLog.textContent = '';
+        reconResultsOutput.textContent = '';
+
+        const target = reconTargetInput.value.trim();
+        const type = reconTypeSelect.value;
+        
+        let reconIsValid = true;
+        document.getElementById('error-reconTarget').textContent = '';
+        if (!target) {
+            displayPayloadError('reconTarget', 'Ціль для розвідки є обов\'язковою.'); // Використовуємо стару функцію, але з новим ID
+            reconIsValid = false;
+        } else if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$/.test(target)) {
+            displayPayloadError('reconTarget', 'Невірний формат цілі. Очікується IP або домен.');
+            reconIsValid = false;
+        }
+
+
+        if (!reconIsValid) {
+            startReconButton.disabled = false;
+            startReconButton.textContent = 'Запустити Розвідку';
+            return;
+        }
+
+        reconLog.textContent = `[RECON_INFO] Запуск розвідки типу '${type}' для цілі '${target}'...\n`;
+        
+        setTimeout(() => {
+            try {
+                let results = `Результати розвідки для: ${target} (тип: ${type})\n`;
+                results += `Час: ${new Date().toLocaleString()}\n\n`;
+
+                if (type === 'port_scan_basic') {
+                    results += "Імітація сканування портів (SRU-1.1.0 концепт):\n";
+                    const commonPorts = [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 3306, 3389, 5900, 8080, 8443];
+                    const openPorts = commonPorts.filter(() => Math.random() > 0.6); // Випадково "відкриваємо" деякі порти
+                    if (openPorts.length > 0) {
+                        openPorts.forEach(port => {
+                            results += `  Порт ${port} (${getServiceName(port)}): ВІДКРИТО\n`;
+                            if (Math.random() > 0.5) { // Імітація банера
+                                results += `    Банер: ServiceBanner_Demo_v${(Math.random() * 3).toFixed(1)} on SimulatedOS\n`;
+                            }
+                        });
+                    } else {
+                        results += "  Відкритих портів (з поширених) не знайдено (імітація).\n";
+                    }
+                } else if (type === 'osint_email_search') {
+                    results += "Імітація пошуку Email (OSINT):\n";
+                    const targetDomain = target.includes('.') ? target.substring(target.lastIndexOf('.', target.lastIndexOf('.') - 1) + 1) : target;
+                    const names = ["john.doe", "jane.smith", "info", "support", "admin"];
+                    const foundEmails = names.filter(() => Math.random() > 0.5).map(name => `${name}@${targetDomain}`);
+                    if (foundEmails.length > 0) {
+                        foundEmails.forEach(email => results += `  Знайдено Email: ${email}\n`);
+                    } else {
+                        results += "  Email-адрес не знайдено (імітація).\n";
+                    }
+                }
+                reconResultsOutput.textContent = results;
+                reconLog.textContent += "[RECON_SUCCESS] Розвідку (імітацію) завершено.\n";
+            } catch (e) {
+                reconLog.textContent += `[RECON_FAILURE] Помилка під час розвідки: ${e.message}\n`;
+                reconResultsOutput.textContent = `Помилка: ${e.message}`;
+            } finally {
+                reconOutputSection.classList.remove('hidden');
+                startReconButton.disabled = false;
+                startReconButton.textContent = 'Запустити Розвідку';
+            }
+        }, 1200); // Імітація затримки на розвідку
+    });
+
+    function getServiceName(port) { // Допоміжна функція для імен сервісів
+        const services = { 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3", 443: "HTTPS", 3306: "MySQL", 3389: "RDP", 8080: "HTTP-Alt" };
+        return services[port] || "Unknown";
+    }
+
+</script>
+</body>
+</html>
