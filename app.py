@@ -1,6 +1,6 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.4.0
-# Призначення: Розширений концептуальний backend на Flask з поглибленою
-#             імітацією метаморфних технік при генерації пейлоадів.
+# Syntax Flask Backend - Segment SFB-CORE-1.5.0
+# Призначення: Backend на Flask з поглибленою імітацією метаморфних технік
+#             (розширена CFO, обфускація рядків, вставка "сміттєвого" коду).
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -12,7 +12,7 @@ import string
 import time
 from datetime import datetime
 
-VERSION_BACKEND = "1.4.0" # Оновлена версія backend
+VERSION_BACKEND = "1.5.0" # Оновлена версія backend
 
 # --- Дані для Імітації C2 (без змін) ---
 simulated_implants_be = []
@@ -21,19 +21,19 @@ implant_task_results_be = {}
 def initialize_simulated_implants_be():
     global simulated_implants_be
     simulated_implants_be = []
-    os_types = ["Windows_x64_10.0.22000", "Linux_x64_6.1.0", "Windows_x64_11_Pro", "macOS_ventura_arm64"]
-    base_ip_prefixes = ["10.10.", "192.168.", "172.20."]
-    num_implants = random.randint(4, 7)
+    os_types = ["Windows_x64_10.0.22621", "Linux_x64_6.2.0", "Windows_Server_2022", "macOS_sonoma_arm64"]
+    base_ip_prefixes = ["10.20.", "192.168.", "172.18."]
+    num_implants = random.randint(4, 8)
     for i in range(num_implants):
-        implant_id = f"SYNIMPLNT-PRO-{random.randint(10000,99999)}-{random.choice(string.ascii_uppercase)}"
+        implant_id = f"SYNIMPLNT-ADV-{random.randint(10000,99999)}-{random.choice(string.ascii_uppercase)}"
         ip_prefix = random.choice(base_ip_prefixes)
-        ip_address = f"{ip_prefix}{random.randint(10,250)}.{random.randint(10,250)}"
+        ip_address = f"{ip_prefix}{random.randint(1,254)}.{random.randint(2,253)}"
         os_type = random.choice(os_types)
-        last_seen_timestamp = time.time() - random.randint(0, 3600) 
+        last_seen_timestamp = time.time() - random.randint(0, 1800) # Останні 30 хв
         last_seen_str = datetime.fromtimestamp(last_seen_timestamp).strftime('%Y-%m-%d %H:%M:%S')
         simulated_implants_be.append({
             "id": implant_id, "ip": ip_address, "os": os_type,
-            "lastSeen": last_seen_str, "status": random.choice(["active_beacon", "idle_low_power", "task_running"]),
+            "lastSeen": last_seen_str, "status": random.choice(["active_tasked", "idle_beaconing", "error_comms"]),
             "files": []
         })
     simulated_implants_be.sort(key=lambda x: x["id"])
@@ -100,93 +100,152 @@ def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple
                     errors.append(f"Значення '{value}' для параметра '{param_name}' не відповідає формату.")
     return not errors, validated_params, errors
 
-# --- Розширена Логіка Метаморфізму та Обфускації ---
-def xor_cipher(data_str: str, key: str) -> str:
-    if not key: key = "DefaultXOR"
+# --- Розширена Логіка Метаморфізму та Обфускації v1.5.0 ---
+def xor_cipher(data_str: str, key: str) -> str: 
+    if not key: key = "DefaultXOR_Key_v2" # Оновлений ключ за замовчуванням
     return "".join([chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(data_str)])
 
 def b64_encode_str(data_str: str) -> str:
     return base64.b64encode(data_str.encode('latin-1')).decode('utf-8')
 
-def b64_decode_str(b64_str: str) -> str:
-    return base64.b64decode(b64_str.encode('utf-8')).decode('latin-1')
+def generate_random_name_be(length=10, prefix="syn_"): # Збільшено довжину, змінено префікс
+    return prefix + ''.join(random.choice(string.ascii_lowercase + '_') for i in range(length)) # Додано '_'
 
-def generate_random_var_name(length=7, prefix="var_"):
-    return prefix + ''.join(random.choice(string.ascii_lowercase) for _ in range(length))
+def obfuscate_string_literals_in_python_code(code: str, key: str) -> tuple[str, str]:
+    """Знаходить та обфускує рядкові літерали в Python коді, вставляє функцію-декодер."""
+    
+    # Знаходимо всі рядкові літерали (в одинарних або подвійних лапках)
+    # Цей regex може бути не ідеальним для складних випадків (напр., багаторядкові рядки, екрановані лапки)
+    # але для демонстрації він підійде.
+    string_literals = list(set(re.findall(r'\"([^\"\\]*(?:\\.[^\"\\]*)*)\"|\'([^\'\\]*(?:\\.[^\'\\]*)*)\'', code)))
+    
+    # Фільтруємо порожні рядки та ті, що вже є викликами функції
+    # Також не обфускуємо дуже короткі рядки або ті, що схожі на імена змінних/ключові слова Python
+    python_keywords = ["False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield"]
+    
+    processed_literals = {} # Щоб уникнути повторної обфускації того самого рядка
+    decoder_func_name = generate_random_name_be(prefix="unveil_str_")
+    
+    modified_code = code
 
-def obfuscate_string_literals_in_stager(stager_code: str, key: str) -> str:
-    """Знаходить та обфускує ключові рядкові літерали в коді стейджера."""
-    # Список рядків, які потенційно є сигнатурами
-    sensitive_strings = [
-        "EVADE_SIM", "SIM_STAGER_EVASION", "Sandbox-like environment detected", "Evasion checks passed",
-        "SIM_PAYLOAD", "Payload executed with content", "simulating beacon to", "get_system_id",
-        "simulating listing directory", "SIM_STAGER", "Stager for", "starting...", "Stager finished."
-    ]
-    
-    # Сортуємо за довжиною, щоб уникнути часткових замін
-    sensitive_strings.sort(key=len, reverse=True)
-    
-    decoder_func_name = generate_random_name_be(prefix="resolve_")
-    decoder_func_code = f"""
+    for match_tuple in string_literals:
+        s_literal = match_tuple[0] if match_tuple[0] else match_tuple[1] # Отримуємо рядок з кортежу
+        if not s_literal or len(s_literal) < 3 or s_literal in python_keywords or s_literal.isidentifier():
+            continue
+        if s_literal in processed_literals: # Якщо вже оброблено
+            # Замінюємо на виклик з вже згенерованою змінною
+            var_name = processed_literals[s_literal]
+            modified_code = modified_code.replace(f"\"{s_literal}\"", var_name)
+            modified_code = modified_code.replace(f"'{s_literal}'", var_name)
+            continue
+
+        obfuscated_s_xor = xor_cipher(s_literal, key)
+        obfuscated_s_b64 = b64_encode_str(obfuscated_s_xor)
+        
+        # Генеруємо унікальне ім'я змінної для цього обфускованого рядка
+        var_name = generate_random_name_be(prefix="obf_str_")
+        processed_literals[s_literal] = var_name # Зберігаємо ім'я змінної
+
+        # Додаємо визначення змінної на початку коду (спрощено, після імпортів)
+        # У реальності, потрібно було б знайти краще місце або зібрати всі визначення разом
+        var_definition = f"{var_name} = {decoder_func_name}(\"{obfuscated_s_b64}\", OBFUSCATION_KEY_EMBEDDED)\n" # Припускаємо, що OBFUSCATION_KEY_EMBEDDED буде визначено
+        
+        import_line_match = re.search(r"import .*?\n", modified_code)
+        if import_line_match:
+            insert_pos = import_line_match.end()
+            modified_code = modified_code[:insert_pos] + var_definition + modified_code[insert_pos:]
+        else:
+            modified_code = var_definition + modified_code
+            
+        # Замінюємо рядок у коді на ім'я змінної
+        modified_code = modified_code.replace(f"\"{s_literal}\"", var_name)
+        modified_code = modified_code.replace(f"'{s_literal}'", var_name)
+
+    # Вставляємо саму функцію декодера, якщо були обфусковані рядки
+    if processed_literals:
+        decoder_func_code = f"""
 def {decoder_func_name}(s_b64, k_s):
-    d_b = base64.b64decode(s_b64.encode('utf-8')).decode('latin-1')
-    return "".join([chr(ord(c) ^ ord(k_s[i % len(k_s)])) for i, c in enumerate(d_b)])
+    # Ця функція деобфускує рядок, який був обфускований XOR та закодований в Base64
+    try:
+        d_b = base64.b64decode(s_b64.encode('utf-8')).decode('latin-1')
+        return "".join([chr(ord(c) ^ ord(k_s[i % len(k_s)])) for i, c in enumerate(d_b)])
+    except Exception: return s_b64 # Повертаємо оригінал у разі помилки
 """
-    # Вставляємо функцію декодера на початку (після імпортів)
-    import_line_match = re.search(r"import .*?\n", stager_code)
-    if import_line_match:
-        insert_pos = import_line_match.end()
-        stager_code = stager_code[:insert_pos] + "\n" + decoder_func_code + "\n" + stager_code[insert_pos:]
-    else: # Якщо немає імпортів, вставляємо на самий початок
-        stager_code = decoder_func_code + "\n" + stager_code
+        import_line_match = re.search(r"import .*?\n", modified_code) # Шукаємо знову, бо код змінився
+        if import_line_match:
+            insert_pos = import_line_match.end()
+            modified_code = modified_code[:insert_pos] + "\n" + decoder_func_code + "\n" + modified_code[insert_pos:]
+        else:
+            modified_code = decoder_func_code + "\n" + modified_code
+        print(f"[METAMORPH_INFO] Обфусковано {len(processed_literals)} рядкових літералів. Функція-декодер: {decoder_func_name}")
 
-    for s_literal in sensitive_strings:
-        if s_literal in stager_code:
-            obfuscated_s = b64_encode_str(xor_cipher(s_literal, key))
-            stager_code = stager_code.replace(f"\"{s_literal}\"", f"{decoder_func_name}(\"{obfuscated_s}\", OBFUSCATION_KEY_EMBEDDED)")
-            stager_code = stager_code.replace(f"'{s_literal}'", f"{decoder_func_name}(\"{obfuscated_s}\", OBFUSCATION_KEY_EMBEDDED)")
-    return stager_code
+    return modified_code
+
 
 def apply_advanced_cfo_be(code_lines: list) -> str:
-    """Застосовує більш різноманітні техніки CFO."""
-    transformed_code = []
-    for line in code_lines:
-        transformed_code.append(line)
-        if random.random() < 0.20 and line.strip() and not line.strip().startswith("#") and "def " not in line: # 20% шанс
+    """Застосовує більш різноманітні техніки CFO та вставку "сміттєвого" коду."""
+    transformed_code_list = []
+    for line_idx, line in enumerate(code_lines):
+        transformed_code_list.append(line)
+        
+        # Вставка "сміттєвого" коду (з певною ймовірністю)
+        if random.random() < 0.10 and line.strip() and not line.strip().startswith("#"): # 10% шанс
             indent = line[:len(line) - len(line.lstrip())]
-            cfo_type = random.randint(1, 4)
-            junk_var = generate_random_name_be()
+            junk_var1 = generate_random_name_be(prefix="junk_val_")
+            junk_var2 = generate_random_name_be(prefix="temp_calc_")
+            junk_ops = [
+                f"{indent}{junk_var1} = {random.randint(1000, 9999)} * {random.randint(1,10)} # Junk calculation",
+                f"{indent}{junk_var2} = \"{''.join(random.choices(string.ascii_letters + string.digits, k=10))}\" # Junk string assignment",
+                f"{indent}# Simple junk comment: {datetime.now().microsecond}"
+            ]
+            transformed_code_list.append(random.choice(junk_ops))
+
+        # Вставка CFO (з певною ймовірністю)
+        if random.random() < 0.20 and line.strip() and not line.strip().startswith("#") and "def " not in line and "class " not in line and "if __name__" not in line:
+            indent = line[:len(line) - len(line.lstrip())]
+            r1, r2 = random.randint(1,100), random.randint(1,100)
+            
+            cfo_type = random.randint(1, 5) # Додано більше патернів
+            cfo_block = f"{indent}# --- CFO Block Type {cfo_type} Start --- \n"
             
             if cfo_type == 1: # Завжди істинний if
-                transformed_code.append(f"{indent}if {random.randint(1,10)} + {random.randint(1,10)} > 0: # CFO Type 1 (True)")
-                transformed_code.append(f"{indent}    {junk_var} = '{generate_random_name_be(5, '')}' # Junk op")
-                transformed_code.append(f"{indent}    pass")
-                transformed_code.append(f"{indent}else:")
-                transformed_code.append(f"{indent}    pass # Dead code")
-            elif cfo_type == 2: # Завжди хибний if (виконується else)
-                transformed_code.append(f"{indent}if '{generate_random_name_be(3, '')}' == '{generate_random_name_be(3, '')}X': # CFO Type 2 (False)")
-                transformed_code.append(f"{indent}    pass # Dead code")
-                transformed_code.append(f"{indent}else:")
-                transformed_code.append(f"{indent}    {junk_var} = {random.randint(100,200)} # Junk op")
-                transformed_code.append(f"{indent}    pass")
-            elif cfo_type == 3: # Невеликий цикл
-                loop_var = generate_random_name_be(1, '_j')
-                transformed_code.append(f"{indent}for {loop_var} in range({random.randint(0,2)}): # CFO Type 3 (Junk Loop)")
-                transformed_code.append(f"{indent}    {junk_var} = {loop_var} * {random.randint(1,5)}")
-                transformed_code.append(f"{indent}    pass")
+                cfo_block += f"{indent}if {r1} + {r2} != {r1 + r2 + 1}: # Opaque True\n"
+                cfo_block += f"{indent}    pass # Actual logic path\n"
+                cfo_block += f"{indent}else:\n"
+                cfo_block += f"{indent}    {generate_random_name_be(prefix='dead_')} = {r1}*{r2} # Dead code\n"
+            elif cfo_type == 2: # Завжди хибний if
+                cfo_block += f"{indent}if {r1} == {r1 + 1}: # Opaque False\n"
+                cfo_block += f"{indent}    {generate_random_name_be(prefix='never_')} = {r1}-{r2} # Dead code\n"
+                cfo_block += f"{indent}else:\n"
+                cfo_block += f"{indent}    pass # Actual logic path\n"
+            elif cfo_type == 3: # Невеликий "сміттєвий" цикл
+                loop_var = generate_random_name_be(1, '_lp')
+                cfo_block += f"{indent}for {loop_var} in range({random.randint(0,2)}):\n"
+                cfo_block += f"{indent}    {generate_random_name_be(prefix='junk_iter_')} = {loop_var} + {r1}\n"
+                cfo_block += f"{indent}    pass\n"
+                cfo_block += f"{indent}pass # Actual logic follows loop"
             elif cfo_type == 4: # Присвоєння та порівняння
-                val1, val2 = random.randint(1,50), random.randint(1,50)
-                transformed_code.append(f"{indent}{junk_var}_a = {val1}")
-                transformed_code.append(f"{indent}{junk_var}_b = {val2}")
-                transformed_code.append(f"{indent}if {junk_var}_a + {junk_var}_b == {val1+val2}: # CFO Type 4 (True by calc)")
-                transformed_code.append(f"{indent}    pass")
-            transformed_code.append(f"{indent}# ---- End CFO Block ----")
-    return "\n".join(transformed_code)
+                var_a = generate_random_name_be(prefix="cfa_")
+                var_b = generate_random_name_be(prefix="cfb_")
+                cfo_block += f"{indent}{var_a} = {r1} * {random.randint(1,3)}\n"
+                cfo_block += f"{indent}{var_b} = {var_a} // {random.randint(1,3) if r1 > 0 else 1}\n"
+                cfo_block += f"{indent}if {var_a} >= {var_b}: # Likely True\n"
+                cfo_block += f"{indent}    pass\n"
+            elif cfo_type == 5: # Вкладений блок
+                cfo_block += f"{indent}if True: # Outer always true\n"
+                cfo_block += f"{indent}    if {r1} < 0: # Inner likely false\n"
+                cfo_block += f"{indent}        pass # Dead path\n"
+                cfo_block += f"{indent}    else:\n"
+                cfo_block += f"{indent}        pass # Real path\n"
 
+            cfo_block += f"\n{indent}# --- CFO Block End ---"
+            transformed_code_list.append(cfo_block)
+            
+    return "\n".join(transformed_code_list)
 # --- Кінець Розширеної Логіки Метаморфізму ---
 
 
-# --- Логіка для Модуля Розвідки (без змін від v1.2.0) ---
+# --- Логіка для Модуля Розвідки (без змін від v1.3.0) ---
 # ... (код simulate_port_scan_be та simulate_osint_email_search_be залишається тут) ...
 def get_service_name_be(port: int) -> str:
     services = { 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3", 443: "HTTPS", 3306: "MySQL", 3389: "RDP", 8080: "HTTP-Alt" }
@@ -226,7 +285,7 @@ def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
     log.append("[RECON_BE_SUCCESS] Імітацію OSINT пошуку email завершено.")
     return log, "\n".join(results_text_lines)
 
-# --- Логіка для Логування та Адаптації (з версії 1.3.0, без змін) ---
+# --- Логіка для Логування та Адаптації (без змін від v1.3.0) ---
 def generate_simulated_operational_logs_be() -> list[dict]:
     logs = []
     log_levels = ["INFO", "WARN", "ERROR", "SUCCESS"]
@@ -263,7 +322,6 @@ def get_simulated_stats_be() -> dict:
         "bestArchetype": random.choice(CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"]),
         "activeImplants": len(simulated_implants_be)
     }
-# --- Кінець логіки для Логування та Адаптації ---
 
 
 app = Flask(__name__)
@@ -276,14 +334,12 @@ def handle_generate_payload():
     try:
         data = request.get_json()
         if not data:
-            # ... (обробка помилки як у v1.3.0) ...
             log_messages.append("[BACKEND_ERROR] Не отримано JSON.")
             return jsonify({"success": False, "error": "No JSON", "generationLog": "\n".join(log_messages)}), 400
         
         log_messages.append(f"[BACKEND_INFO] Параметри: {json.dumps(data, indent=2, ensure_ascii=False)}")
         is_valid, validated_params, errors = conceptual_validate_parameters_be(data, CONCEPTUAL_PARAMS_SCHEMA_BE)
         if not is_valid:
-            # ... (обробка помилки валідації як у v1.3.0) ...
             log_messages.append(f"[BACKEND_VALIDATION_FAILURE] Помилки: {errors}")
             return jsonify({"success": False, "error": "Validation failed", "errors": errors, "generationLog": "\n".join(log_messages)}), 400
         log_messages.append("[BACKEND_VALIDATION_SUCCESS] Валідація успішна.")
@@ -302,37 +358,38 @@ def handle_generate_payload():
         
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
         log_messages.append(f"[BACKEND_OBF_INFO] Обфускація даних ('{data_to_obfuscate[:20]}...') з ключем '{key}'.")
-        obfuscated_data_raw = conceptual_xor_string_be(data_to_obfuscate, key)
-        obfuscated_data_b64 = b64_encode_str(obfuscated_data_raw) # Використання нової функції
+        obfuscated_data_raw = xor_cipher(data_to_obfuscate, key)
+        obfuscated_data_b64 = b64_encode_str(obfuscated_data_raw)
         log_messages.append(f"[BACKEND_OBF_SUCCESS] Дані обфусковано: {obfuscated_data_b64[:30]}...")
 
         log_messages.append(f"[BACKEND_STAGER_GEN_INFO] Генерація стейджера...")
         
         # Базовий шаблон стейджера (імітація Python)
-        stager_code_lines = [
+        # Будемо використовувати більш гнучкий підхід до формування коду
+        stager_code_parts = [
             f"# SYNTAX Conceptual Python Stager (Backend Generated v{VERSION_BACKEND})",
             f"# Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"# Archetype: {archetype_name}",
-            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", # Дані вже в Base64
-            f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"",
+            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", 
+            f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"", # Ключ для даних пейлоада
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
             f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
-            "", "import base64", "import os", "import time", "import random", ""
+            "", "import base64", "import os", "import time", "import random", "import string", "" # Додано string
         ]
         
-        # Функції декодування та виконання (можуть бути перейменовані метаморфізмом)
+        # Функції, що будуть вбудовані (їхні назви можуть бути обфусковані)
         decode_func_name_runtime = "dx_runtime"
         evasion_func_name_runtime = "ec_runtime"
         execute_func_name_runtime = "ex_runtime"
 
-        stager_code_lines.extend([
+        # Додаємо функції до списку рядків
+        stager_code_parts.extend([
             f"def {decode_func_name_runtime}(b64_data, key_str):",
-            "    # У реальному Python: base64.b64decode(b64_data).decode('latin-1')",
-            "    # Потім XOR. Тут спрощена імітація.",
+            "    # Імітація XOR + Base64 декодування",
             "    try:",
             "        temp_decoded_bytes = base64.b64decode(b64_data.encode('utf-8'))",
             "        temp_decoded_str = temp_decoded_bytes.decode('latin-1')",
-            "    except Exception as e_b64: return f\"B64_DECODE_ERROR: {{e_b64}}\"",
+            "    except Exception: return \"DECODE_ERROR\"", # Проста обробка помилки
             "    o_chars = []",
             "    for i_char_idx in range(len(temp_decoded_str)):",
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
@@ -340,12 +397,16 @@ def handle_generate_payload():
             "",
             f"def {evasion_func_name_runtime}():",
             "    print(\"[SIM_STAGER_EVASION] Performing simulated evasion checks...\")",
-            "    # Більш просунуті перевірки можна додати сюди",
-            "    if os.name == 'nt' and 'SANDBOX_USER' in os.environ:",
-            "        print(\"[SIM_STAGER_EVASION] SANDBOX_USER environment variable found!\")",
-            "        return True",
-            "    if random.random() < 0.15: # 15% шанс на інший індикатор",
-            "        print(\"[SIM_STAGER_EVASION] Another sandbox-like indicator detected (simulated)!\")",
+            "    # Розширені перевірки",
+            "    indicators = []",
+            "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\"]",
+            "    try: current_user = os.getlogin().lower()",
+            "    except Exception: current_user = 'unknown_user'", # Обробка помилки, якщо getlogin не спрацює
+            "    if current_user in common_sandbox_users: indicators.append('common_username')",
+            "    if random.random() < 0.1: indicators.append('suspicious_file_found_sim')",
+            "    if random.random() < 0.15: indicators.append('low_disk_space_sim')",
+            "    if indicators:",
+            "        print(f\"[SIM_STAGER_EVASION] Sandbox-like indicators: {{', '.join(indicators)}}! Altering behavior.\")",
             "        return True",
             "    print(\"[SIM_STAGER_EVASION] Evasion checks passed (simulated).\")",
             "    return False",
@@ -368,7 +429,7 @@ def handle_generate_payload():
             f"        decoded_payload_content = {decode_func_name_runtime}(OBF_DATA_B64, OBFUSCATION_KEY_EMBEDDED)",
             f"        {execute_func_name_runtime}(decoded_payload_content, \"{archetype_name}\")",
             "    else:",
-            "        print(\"[SIM_STAGER] Sandbox detected, altering behavior or exiting.\")",
+            "        print(\"[SIM_STAGER] Sandbox detected, normal execution path skipped.\")",
             "    print(\"[SIM_STAGER] Stager finished.\")"
         ])
         
@@ -376,21 +437,27 @@ def handle_generate_payload():
 
         if validated_params.get('enable_stager_metamorphism', False):
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму...")
-            stager_code_raw_list = stager_code_raw.splitlines() # Для apply_cfo_be
-            stager_code_raw = apply_advanced_cfo_be(stager_code_raw_list) # Використовуємо нову CFO
             
-            # Перейменування функцій (після CFO, щоб не зламати плейсхолдери)
-            new_decode_name = generate_random_name_be(prefix="unveil_")
-            new_evasion_name = generate_random_name_be(prefix="audit_env_")
-            new_execute_name = generate_random_name_be(prefix="dispatch_core_")
-            stager_code_raw = stager_code_raw.replace(decode_func_name_runtime, new_decode_name)
-            stager_code_raw = stager_code_raw.replace(evasion_func_name_runtime, new_evasion_name)
-            stager_code_raw = stager_code_raw.replace(execute_func_name_runtime, new_execute_name)
-            
-            # Обфускація рядкових літералів
-            stager_code_raw = obfuscate_string_literals_in_stager(stager_code_raw, key) # Використовуємо основний ключ для простоти
+            # 1. Обфускація рядкових літералів (використовуємо ключ пейлоада для простоти)
+            stager_code_raw = obfuscate_string_literals_in_stager(stager_code_raw, key)
+            log_messages.append("[BACKEND_METAMORPH_INFO] Обфускацію рядків завершено.")
 
-            log_messages.append(f"[BACKEND_METAMORPH_SUCCESS] Метаморфізм застосовано (функції: {new_decode_name}, {new_evasion_name}, {new_execute_name}).")
+            # 2. Обфускація керуючого потоку
+            stager_code_raw_list_for_cfo = stager_code_raw.splitlines() 
+            stager_code_raw = apply_advanced_cfo_be(stager_code_raw_list_for_cfo) 
+            log_messages.append("[BACKEND_METAMORPH_INFO] Обфускацію керуючого потоку завершено.")
+            
+            # 3. Перейменування функцій (після CFO, щоб не зламати плейсхолдери, якщо вони були)
+            # Назви функцій вже визначені як decode_func_name_runtime і т.д.
+            # Тепер ми їх перейменовуємо на випадкові
+            final_decode_name = generate_random_name_be(prefix="unveil_data_")
+            final_evasion_name = generate_random_name_be(prefix="verify_runtime_")
+            final_execute_name = generate_random_name_be(prefix="dispatch_payload_")
+            
+            stager_code_raw = stager_code_raw.replace(decode_func_name_runtime, final_decode_name)
+            stager_code_raw = stager_code_raw.replace(evasion_func_name_runtime, final_evasion_name)
+            stager_code_raw = stager_code_raw.replace(execute_func_name_runtime, final_execute_name)
+            log_messages.append(f"[BACKEND_METAMORPH_SUCCESS] Метаморфізм застосовано (функції: {final_decode_name}, {final_evasion_name}, {final_execute_name}).")
 
         final_stager_output = stager_code_raw
         if validated_params.get("output_format") == "base64_encoded_stager":
@@ -407,7 +474,6 @@ def handle_generate_payload():
 
 @app.route('/api/run_recon', methods=['POST'])
 def handle_run_recon():
-    # ... (код з версії 1.3.0 без змін) ...
     log_messages = [f"[BACKEND v{VERSION_BACKEND}] Запит /api/run_recon о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
@@ -430,7 +496,6 @@ def handle_run_recon():
 
 @app.route('/api/c2/implants', methods=['GET'])
 def get_c2_implants():
-    # ... (код з версії 1.3.0 без змін) ...
     global simulated_implants_be
     if not simulated_implants_be or random.random() < 0.2: 
         initialize_simulated_implants_be()
@@ -442,7 +507,6 @@ def get_c2_implants():
     
 @app.route('/api/c2/task', methods=['POST'])
 def handle_c2_task():
-    # ... (код з версії 1.3.0 без змін) ...
     log_messages = [f"[C2_BE v{VERSION_BACKEND}] Запит /api/c2/task о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
@@ -460,7 +524,12 @@ def handle_c2_task():
             task_result_output += f"  OS: {os_info}\n  IP: {ip_info}\n  User: SimUser_{random.randint(1,100)}\n  Host: HOST_{implant_id[-4:]}"
         elif task_type == "listdir":
             path_to_list = task_params if task_params else "."
-            sim_files = [f"f_{generate_random_name_be(3,'')}.dat", f"doc_{generate_random_name_be(4,'')}.pdf", "conf.ini", "backup/"]
+            sim_files = [
+                f"f_{generate_random_name_be(3,'')}.dat", 
+                f"doc_{generate_random_name_be(4,'')}.pdf", 
+                "conf.ini", 
+                "backup/"
+            ]
             files_for_implant = random.sample(sim_files, k=random.randint(1, len(sim_files)))
             task_result_output += f"  Перелік для '{path_to_list}':\n    " + "\n    ".join(files_for_implant)
             if target_implant_obj: target_implant_obj["files"] = files_for_implant
@@ -476,14 +545,18 @@ def handle_c2_task():
 
 @app.route('/api/operational_data', methods=['GET'])
 def get_operational_data():
-    # ... (код з версії 1.3.0 без змін) ...
     log_messages_be = [f"[LOG_ADAPT_BE v{VERSION_BACKEND}] Запит /api/operational_data о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         simulated_logs = generate_simulated_operational_logs_be()
         simulated_stats = get_simulated_stats_be()
         log_messages_be.append(f"[LOG_ADAPT_BE_INFO] Згенеровано {len(simulated_logs)} логів та статистику.")
         time.sleep(0.3) 
-        return jsonify({"success": True, "aggregatedLogs": simulated_logs, "statistics": simulated_stats, "log": "\n".join(log_messages_be)}), 200
+        return jsonify({
+            "success": True,
+            "aggregatedLogs": simulated_logs,
+            "statistics": simulated_stats,
+            "log": "\n".join(log_messages_be)
+        }), 200
     except Exception as e:
         print(f"SERVER ERROR (operational_data): {str(e)}"); import traceback; traceback.print_exc()
         log_messages_be.append(f"[LOG_ADAPT_BE_FATAL_ERROR] {str(e)}")
@@ -491,7 +564,6 @@ def get_operational_data():
 
 @app.route('/api/framework_rules', methods=['POST'])
 def update_framework_rules():
-    # ... (код з версії 1.3.0 без змін) ...
     log_messages_be = [f"[LOG_ADAPT_BE v{VERSION_BACKEND}] Запит /api/framework_rules о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
@@ -504,7 +576,11 @@ def update_framework_rules():
         if auto_adapt_enabled: confirmation_message += " Режим автоматичної адаптації увімкнено (імітація)."
         else: confirmation_message += " Режим автоматичної адаптації вимкнено (імітація)."
         log_messages_be.append(f"[LOG_ADAPT_BE_SUCCESS] {confirmation_message}")
-        return jsonify({"success": True, "message": confirmation_message, "log": "\n".join(log_messages_be)}), 200
+        return jsonify({
+            "success": True,
+            "message": confirmation_message,
+            "log": "\n".join(log_messages_be)
+        }), 200
     except Exception as e:
         print(f"SERVER ERROR (framework_rules): {str(e)}"); import traceback; traceback.print_exc()
         log_messages_be.append(f"[LOG_ADAPT_BE_FATAL_ERROR] {str(e)}")

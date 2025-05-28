@@ -868,16 +868,13 @@
     });
     if (loggingAdaptationTab) { 
          loggingTabObserver.observe(loggingAdaptationTab, { attributes: true });
-         // Початкове завантаження, якщо вкладка активна за замовчуванням (але перша вкладка - генератор)
-         // Тому, якщо потрібно завантажити при першому відкритті, логіка в обробнику click для табів це зробить.
+         if (loggingAdaptationTab.classList.contains('active')) { 
+            fetchOperationalData();
+         }
     }
-    // Початкове завантаження для активної вкладки C2 (якщо вона активна за замовчуванням)
-    // Оскільки перша вкладка - генератор, ця умова не спрацює при завантаженні сторінки.
-    // Логіка в обробнику кліків табів подбає про завантаження даних при першому переході.
-    // if (c2ControlTab && c2ControlTab.classList.contains('active')) {
-    //     fetchAndRenderImplants();
-    // }
-
+    if (c2ControlTab && c2ControlTab.classList.contains('active')) {
+        fetchAndRenderImplants();
+    }
 
 </script>
 </body>
