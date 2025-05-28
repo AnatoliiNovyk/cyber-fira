@@ -140,7 +140,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-3xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.8.GUI (Backend для C2)</p>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v2.9.GUI (Повний Backend)</p>
         </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
@@ -868,13 +868,16 @@
     });
     if (loggingAdaptationTab) { 
          loggingTabObserver.observe(loggingAdaptationTab, { attributes: true });
-         if (loggingAdaptationTab.classList.contains('active')) { 
-            fetchOperationalData();
-         }
+         // Початкове завантаження, якщо вкладка активна за замовчуванням (але перша вкладка - генератор)
+         // Тому, якщо потрібно завантажити при першому відкритті, логіка в обробнику click для табів це зробить.
     }
-    if (c2ControlTab && c2ControlTab.classList.contains('active')) {
-        fetchAndRenderImplants();
-    }
+    // Початкове завантаження для активної вкладки C2 (якщо вона активна за замовчуванням)
+    // Оскільки перша вкладка - генератор, ця умова не спрацює при завантаженні сторінки.
+    // Логіка в обробнику кліків табів подбає про завантаження даних при першому переході.
+    // if (c2ControlTab && c2ControlTab.classList.contains('active')) {
+    //     fetchAndRenderImplants();
+    // }
+
 
 </script>
 </body>
