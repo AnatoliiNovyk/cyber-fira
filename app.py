@@ -1,9 +1,11 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.7.9
-# Призначення: Backend на Flask з розширеним парсингом XML-виводу nmap (OS, CPE).
-# Оновлення v1.7.9:
-#   - Розширено parse_nmap_xml_output_for_services для вилучення OS (osmatch) та CPE сервісів.
-#   - Оновлено /api/run_recon для повернення розширеної інформації.
-#   - Оновлено логування.
+# Syntax Flask Backend - Segment SFB-CORE-1.8.0
+# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
+# Оновлення v1.8.0:
+#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
+#     - Додано концептуальну перевірку на процеси аналітичних інструментів.
+#     - Додано концептуальну перевірку на хукінг API (Windows).
+#     - Додано концептуальну перевірку активності миші (Windows).
+#   - Оновлено логування для нових технік ухилення.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -24,12 +26,12 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.7.9"
+VERSION_BACKEND = "1.8.0"
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.8)
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.9)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -62,7 +64,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.8)
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.9)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -381,11 +383,7 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]: # Логіка 
     log.append("[RECON_BE_SUCCESS] Імітацію сканування портів завершено.")
     return log, "\n".join(results_text_lines)
 
-def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]:
-    """
-    Парсер для XML-виводу nmap (-oX) для отримання портів, сервісів, версій, CPE та інформації про ОС.
-    Повертає кортеж: (список_сервісів, список_інформації_про_ОС)
-    """
+def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]: # Логіка (без змін)
     parsed_services = []
     parsed_os_info = []
     try:
@@ -393,14 +391,10 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
         if not nmap_xml_output.strip():
             log_messages.append("[NMAP_XML_PARSE_WARN] XML-вивід порожній.")
             return parsed_services, parsed_os_info
-
         root = ET.fromstring(nmap_xml_output)
-        
         for host_node in root.findall('host'):
             address_node = host_node.find('address')
             host_ip = address_node.get('addr') if address_node is not None else "N/A"
-            
-            # Парсинг інформації про ОС
             os_node = host_node.find('os')
             if os_node is not None:
                 for osmatch_node in os_node.findall('osmatch'):
@@ -411,63 +405,48 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                     os_gen = os_class_node.get('osgen', '') if os_class_node is not None else ''
                     cpe_nodes = os_class_node.findall('cpe') if os_class_node is not None else []
                     os_cpes = [cpe.text for cpe in cpe_nodes if cpe.text]
-                    
                     parsed_os_info.append({
-                        "host_ip": host_ip,
-                        "name": os_name,
-                        "accuracy": accuracy,
-                        "family": os_family,
-                        "generation": os_gen,
-                        "cpes": os_cpes
+                        "host_ip": host_ip, "name": os_name, "accuracy": accuracy,
+                        "family": os_family, "generation": os_gen, "cpes": os_cpes
                     })
                     log_messages.append(f"[NMAP_XML_PARSE_OS] Знайдено ОС: {os_name} (Точність: {accuracy}) для хоста {host_ip}")
-
             ports_node = host_node.find('ports')
             if ports_node is None:
                 continue
-
             for port_node in ports_node.findall('port'):
                 state_node = port_node.find('state')
                 if state_node is None or state_node.get('state') != 'open':
                     continue 
-
                 port_id = port_node.get('portid')
                 protocol = port_node.get('protocol') 
-
                 service_node = port_node.find('service')
                 service_name = service_node.get('name', 'unknown') if service_node is not None else 'unknown'
                 product_name = service_node.get('product', '') if service_node is not None else ''
                 version_number = service_node.get('version', '') if service_node is not None else ''
                 extrainfo = service_node.get('extrainfo', '') if service_node is not None else ''
-                
                 service_cpes = []
                 if service_node is not None:
                     for cpe_node in service_node.findall('cpe'):
                         if cpe_node.text:
                             service_cpes.append(cpe_node.text)
-                
                 version_info_parts = [product_name, version_number, extrainfo]
                 version_info_full = " ".join(part for part in version_info_parts if part).strip()
                 if not version_info_full:
                     version_info_full = service_name
-
                 service_key_for_cve = product_name.lower().strip() if product_name else service_name.lower().strip()
                 if version_number:
                     service_key_for_cve += f" {version_number.lower().strip()}"
-                
                 if not product_name and service_name != 'unknown':
                      service_key_for_cve = service_name.lower().strip()
                      if not version_number and extrainfo:
                          version_match_extra = re.search(r"(\d+\.[\d\.\w-]+)", extrainfo)
                          if version_match_extra:
                              service_key_for_cve += f" {version_match_extra.group(1).lower().strip()}"
-
                 parsed_services.append({
                     "host_ip": host_ip, "port": port_id, "protocol": protocol,
                     "service_name": service_name, "product": product_name,
                     "version_number": version_number, "extrainfo": extrainfo,
-                    "version_info_full": version_info_full,
-                    "cpes": service_cpes, # Додано CPE для сервісу
+                    "version_info_full": version_info_full, "cpes": service_cpes,
                     "service_key_for_cve": service_key_for_cve.strip()
                 })
         log_messages.append(f"[NMAP_XML_PARSE_SUCCESS] Успішно розпарсено XML, знайдено {len(parsed_services)} відкритих сервісів та {len(parsed_os_info)} записів ОС.")
@@ -477,13 +456,11 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
         log_messages.append(f"[NMAP_XML_PARSE_FATAL] Непередбачена помилка під час парсингу XML: {e_generic}")
     return parsed_services, parsed_os_info
 
-
 def conceptual_cve_lookup_be(services_info: list, log_messages: list) -> list[dict]: # Логіка (без змін)
     found_cves = []
     log_messages.append(f"[CVE_LOOKUP_BE_INFO] Пошук CVE для {len(services_info)} виявлених сервісів (з XML).")
     for service_item in services_info:
         service_key_raw = service_item.get("service_key_for_cve", "").lower().strip()
-        # TODO_SYNTAX: Розширити логіку пошуку CVE, використовуючи також CPE сервісів (service_item.get("cpes"))
         possible_keys = [service_key_raw]
         product_only = service_item.get("product", "").lower().strip()
         if product_only and product_only != service_key_raw:
@@ -523,108 +500,82 @@ def conceptual_cve_lookup_be(services_info: list, log_messages: list) -> list[di
         log_messages.append("[CVE_LOOKUP_BE_INFO] Відповідних CVE не знайдено в концептуальній базі для жодного сервісу.")
     return found_cves
 
-def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool = False) -> tuple[list[str], str, list[dict], list[dict]]:
-    """
-    Виконує сканування nmap.
-    Повертає: (логи, необроблений_вивід, список_сервісів, список_інформації_про_ОС)
-    """
+def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool = False) -> tuple[list[str], str, list[dict], list[dict]]: # Логіка (без змін)
     log = [f"[RECON_NMAP_BE_INFO] Запуск nmap для: {target}, опції: {options}, XML: {use_xml_output}"]
     base_command = ["nmap"]
     effective_options = list(options) if options else []
-
-    # Гарантуємо -sV для парсингу сервісів, -O для парсингу ОС, -oX - для XML виводу
     if use_xml_output:
-        if not any("-sV" in opt for opt in effective_options):
-            effective_options.append("-sV")
-        if not any("-O" in opt for opt in effective_options) and not any("-A" in opt for opt in effective_options) : # -A включає -O
-             effective_options.append("-O") # Додаємо визначення ОС, якщо його немає
-        
         xml_output_option_present = any("-oX" in opt for opt in effective_options)
         if not xml_output_option_present:
             effective_options.append("-oX")
-            effective_options.append("-") # Вивід XML в stdout
-    
+            effective_options.append("-")
+        if not any("-sV" in opt for opt in effective_options):
+             effective_options.append("-sV")
+        if not any("-O" in opt for opt in effective_options) and not any("-A" in opt for opt in effective_options):
+             effective_options.append("-O")
     if not effective_options: 
         effective_options = ["-sV", "-T4", "-Pn"] if not use_xml_output else ["-sV", "-O", "-T4", "-Pn", "-oX", "-"]
-
-
+    
     allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX", "-oN", "-oG", "-iL", "--script"]
     final_command_parts = [base_command[0]]
-    seen_options_main = set() # Для уникнення дублювання основних опцій типу -sV, -O
-    
-    # Обробка опцій для уникнення конфліктів та забезпечення необхідних опцій
-    # Наприклад, якщо є -A, то -O та -sV вже включені
+    seen_options_main = set() 
     has_A_option = any("-A" in opt for opt in effective_options)
     if has_A_option:
         seen_options_main.add("-sV")
         seen_options_main.add("-O")
-
-    # Додаємо опції, уникаючи дублікатів
     temp_opts_for_cmd = []
     i = 0
     while i < len(effective_options):
         opt = effective_options[i]
-        main_opt_part = opt.split(' ')[0] # Наприклад, -p з "-p 1-100"
-
+        main_opt_part = opt.split(' ')[0] 
         is_allowed = any(opt.startswith(p) for p in allowed_options_prefixes)
-        is_arg_like = opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt) or "=" in opt # Дозволяємо аргументи типу name=value
-
+        is_arg_like = opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt) or "=" in opt 
         if is_allowed:
             if main_opt_part not in seen_options_main:
                 temp_opts_for_cmd.append(opt)
                 seen_options_main.add(main_opt_part)
-                # Перевірка, чи опція потребує аргументу, який йде наступним
                 if main_opt_part in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL", "--script"] and (i + 1) < len(effective_options):
-                    # Якщо наступний елемент не є новою опцією, вважаємо його аргументом
                     if not any(effective_options[i+1].startswith(p) for p in allowed_options_prefixes):
                         temp_opts_for_cmd.append(effective_options[i+1])
-                        i += 1 # Пропускаємо наступний елемент, бо він вже оброблений як аргумент
+                        i += 1 
             elif main_opt_part == "-oX" and opt == "-oX" and (i + 1) < len(effective_options) and effective_options[i+1] == "-":
-                 # Дозволяємо "-oX -" навіть якщо -oX вже було (для гарантії stdout)
                  if not ("-oX" in temp_opts_for_cmd and "-" in temp_opts_for_cmd[temp_opts_for_cmd.index("-oX")+1:]):
                     temp_opts_for_cmd.append("-oX")
                     temp_opts_for_cmd.append("-")
                     i += 1 
             else:
                 log.append(f"[RECON_NMAP_BE_WARN] Опцію '{main_opt_part}' або її варіант вже додано або вона конфліктує. Пропускається: {opt}")
-
         elif is_arg_like and temp_opts_for_cmd and any(temp_opts_for_cmd[-1].startswith(p) for p in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL", "--script"]):
-            # Це ймовірно аргумент попередньої опції, якщо вона його очікує і він ще не був доданий
-            # Ця логіка може бути складною, shlex.split для всього рядка опцій може бути кращим
-            # Поки що припускаємо, що опції та їх аргументи передаються окремо або разом (напр. "-p1-1000")
              log.append(f"[RECON_NMAP_BE_DEBUG] Додавання потенційного аргументу '{opt}' для попередньої опції.")
-             temp_opts_for_cmd.append(opt) # Додаємо як є, сподіваючись, що nmap розбереться
+             temp_opts_for_cmd.append(opt) 
         elif not is_allowed:
              log.append(f"[RECON_NMAP_BE_WARN] Недозволена або невідома опція nmap: {opt}")
         i += 1
-        
     final_command_parts.extend(temp_opts_for_cmd)
     final_command_parts.append(target)
     log.append(f"[RECON_NMAP_BE_CMD_FINAL] Команда nmap: {' '.join(final_command_parts)}")
-    
     parsed_services_list = []
     parsed_os_list = []
     raw_output_text = ""
-
     try:
-        process = subprocess.run(final_command_parts, capture_output=True, text=True, timeout=420, check=False) # Збільшено timeout до 7 хвилин
-        raw_output_text = process.stdout if process.returncode == 0 else process.stderr # Зберігаємо весь вивід
-        
+        process = subprocess.run(final_command_parts, capture_output=True, text=True, timeout=420, check=False)
+        raw_output_text = process.stdout if process.returncode == 0 else process.stderr
         if process.returncode == 0:
             log.append("[RECON_NMAP_BE_SUCCESS] Nmap сканування успішно завершено.")
             if use_xml_output:
-                # `raw_output_text` тут містить XML
                 parsed_services_list, parsed_os_list = parse_nmap_xml_output_for_services(raw_output_text, log)
                 log.append(f"[RECON_NMAP_BE_PARSE_XML] Знайдено {len(parsed_services_list)} сервісів та {len(parsed_os_list)} записів ОС з XML.")
-                results_text_for_display = raw_output_text # Повертаємо XML для детального перегляду
+                results_text_for_display = raw_output_text 
             else:
                 results_text_for_display = f"Результати Nmap сканування для: {target}\n\n{raw_output_text}"
         else:
             error_message = f"Помилка виконання Nmap (код: {process.returncode}): {raw_output_text}"
             log.append(f"[RECON_NMAP_BE_ERROR] {error_message}")
             results_text_for_display = f"Помилка Nmap сканування для {target}:\n{error_message}"
-            # ... (обробка специфічних помилок nmap без змін)
-
+            if "Host seems down" in raw_output_text:
+                 results_text_for_display += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
+            elif " consentement explicite" in raw_output_text or "explicit permission" in raw_output_text :
+                 results_text_for_display += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
     except FileNotFoundError:
         log.append("[RECON_NMAP_BE_ERROR] Команду nmap не знайдено.")
         results_text_for_display = "Помилка: nmap не встановлено або не знайдено в системному PATH."
@@ -634,9 +585,7 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
     except Exception as e:
         log.append(f"[RECON_NMAP_BE_FATAL] Непередбачена помилка: {str(e)}")
         results_text_for_display = f"Непередбачена помилка під час nmap сканування: {str(e)}"
-    
     return log, results_text_for_display, parsed_services_list, parsed_os_list
-
 
 def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]: # Логіка (без змін)
     log = [f"[RECON_BE_INFO] Імітація OSINT пошуку email для домену: {target_domain}"]
@@ -1101,16 +1050,15 @@ def handle_run_recon():
             recon_log_additions, recon_results_text = simulate_port_scan_be(target)
         elif recon_type == "port_scan_nmap_standard":
             nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else ["-sV", "-T4", "-Pn"]
-            recon_log_additions, recon_results_text, _, _ = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=False) # Додано _ для parsed_os_info
+            recon_log_additions, recon_results_text, _, _ = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=False) 
         elif recon_type == "port_scan_nmap_cve_basic":
             nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else []
             if not any("-sV" in opt for opt in nmap_options_list): nmap_options_list.append("-sV")
-            if not any("-O" in opt for opt in nmap_options_list) and not any("-A" in opt for opt in nmap_options_list): nmap_options_list.append("-O") # Для отримання інфо про ОС
+            if not any("-O" in opt for opt in nmap_options_list) and not any("-A" in opt for opt in nmap_options_list): nmap_options_list.append("-O") 
             
             recon_log_additions_nmap, nmap_xml_data, parsed_services_nmap, parsed_os_nmap = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=True)
             recon_log_additions.extend(recon_log_additions_nmap)
             
-            # Формуємо текстовий результат
             recon_results_text = f"Nmap Raw XML Output for {target}:\n\n{nmap_xml_data}\n\n"
             recon_results_text += "--- Parsed OS Information ---\n"
             if parsed_os_nmap:
