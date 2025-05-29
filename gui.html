@@ -145,7 +145,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.4.GUI</p> </header>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.5.GUI</p> </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
@@ -336,7 +336,7 @@
                     <select id="reconType" name="recon_type" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-teal-500 focus:border-teal-500">
                         <option value="port_scan_basic">Сканування Портів (Базове - Імітація)</option>
                         <option value="osint_email_search">Пошук Email (OSINT - Імітація)</option>
-                        <option value="port_scan_nmap_standard">Nmap Скан (Стандартний)</option>
+                        <option value="osint_subdomain_search_concept">OSINT Пошук Субдоменів (Концепт)</option> <option value="port_scan_nmap_standard">Nmap Скан (Стандартний)</option>
                         <option value="port_scan_nmap_cve_basic">Nmap Скан (Версії, ОС, CVE)</option>
                     </select>
                 </div>
@@ -384,7 +384,9 @@
                                     <option value="list_directory">Перелік Директорії</option>
                                     <option value="exec_command">Виконати Команду</option>
                                     <option value="exfiltrate_file_chunked">Ексфільтрація Файлу (Частинами)</option>
-                                    <option value="download_file">Download File (з Імпланта)</option> <option value="upload_file_b64">Upload File (Base64 на Імплант)</option> </select>
+                                    <option value="download_file">Download File (з Імпланта)</option>
+                                    <option value="upload_file_b64">Upload File (Base64 на Імплант)</option>
+                                </select>
                             </div>
                             <div id="c2TaskParamsContainer" class="space-y-3">
                                 <div id="params_list_directory_c2" class="form-section hidden">
@@ -395,7 +397,8 @@
                                      <label for="c2ExecCommand" class="text-gray-300">Команда для Виконання:</label>
                                      <input type="text" id="c2ExecCommand" name="exec_command" placeholder="напр. whoami або ls -la" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
                                 </div>
-                                <div id="params_exfiltrate_file_chunked_c2" class="form-section hidden"> <label for="c2ExfilFileChunked" class="text-gray-300">Шлях до Файлу на Імпланті:</label>
+                                <div id="params_exfiltrate_file_chunked_c2" class="form-section hidden">
+                                     <label for="c2ExfilFileChunked" class="text-gray-300">Шлях до Файлу на Імпланті:</label>
                                      <input type="text" id="c2ExfilFileChunked" name="exfil_file_chunked" placeholder="напр. /etc/passwd або C:\\secrets.txt" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
                                      <div id="error-c2ExfilFileChunked" class="error-message"></div>
                                 </div>
@@ -892,7 +895,7 @@
     function updateC2TaskParamsVisibility() {
         if(!c2TaskTypeSelect || !c2TaskParamsContainer) return;
         const taskType = c2TaskTypeSelect.value;
-        clearAllErrors('c2TaskForm'); // Очищаємо помилки при зміні типу завдання
+        clearAllErrors('c2TaskForm'); 
 
         Object.values(c2TaskParamSectionsConfig).forEach(sectionId => {
             const section = document.getElementById(sectionId);
@@ -904,7 +907,6 @@
             const sectionToShow = document.getElementById(relevantSectionId);
             if (sectionToShow) {
                  sectionToShow.classList.remove('hidden');
-                 // Змінюємо placeholder для download_file
                  const exfilField = document.getElementById('c2ExfilFileChunked');
                  const exfilLabel = exfilField ? exfilField.previousElementSibling : null;
                  if (taskType === 'download_file' && exfilField && exfilLabel) {
@@ -950,14 +952,13 @@
                 isValid = false;
             } else {
                 try {
-                    atob(contentB64); // Спроба декодування для перевірки валідності Base64
+                    atob(contentB64); 
                 } catch(e) {
                     displayError('error-c2UploadFileContentB64', 'Невірний формат Base64.');
                     isValid = false;
                 }
             }
         }
-        // Додати валідацію для інших типів завдань, якщо потрібно
         return isValid;
     }
 
@@ -988,7 +989,7 @@
                     path: document.getElementById('c2UploadFilePath').value,
                     content_b64: document.getElementById('c2UploadFileContentB64').value
                 };
-            } else { // get_system_info або інші без параметрів
+            } else { 
                  taskParamsValue = "";
             }
 
@@ -1003,7 +1004,7 @@
                     body: JSON.stringify({
                         implant_id: currentSelectedImplantC2.id,
                         task_type: taskType,
-                        task_params: taskParamsValue, // task_params може бути рядком або об'єктом (який backend перетворить на JSON-рядок для upload_file_b64)
+                        task_params: taskParamsValue, 
                         queue_task: queueTask
                     }),
                 });
@@ -1160,6 +1161,7 @@
             const tabId = activeTab.dataset.tab;
             if (tabId === 'c2ControlTab') {
                 fetchAndRenderImplants();
+                updateC2TaskParamsVisibility();
             } else if (tabId === 'loggingAdaptationTab') {
                 fetchOperationalData();
             }
