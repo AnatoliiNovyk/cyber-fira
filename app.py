@@ -1,10 +1,11 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.6.7
-# Призначення: Backend на Flask з концептуальним пошуком CVE на основі результатів nmap.
-# Оновлення v1.6.7:
-#   - Додано функцію conceptual_cve_lookup_be для симуляції пошуку CVE.
-#   - Модифіковано perform_nmap_scan_be для спроби парсингу версій сервісів.
-#   - Додано новий тип розвідки 'port_scan_nmap_cve_basic' в /api/run_recon.
-#   - Оновлено логування.
+# Syntax Flask Backend - Segment SFB-CORE-1.6.8
+# Призначення: Backend на Flask з парсингом XML-виводу nmap для більш надійного аналізу.
+# Оновлення v1.6.8:
+#   - Модифіковано perform_nmap_scan_be для використання XML-виводу nmap (-oX -).
+#   - Додано функцію parse_nmap_xml_output_for_services для парсингу XML.
+#   - Оновлено conceptual_cve_lookup_be для роботи з даними з XML.
+#   - Оновлено тип розвідки port_scan_nmap_cve_basic.
+#   - Додано імпорт xml.etree.ElementTree.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -19,8 +20,9 @@ import subprocess
 import shlex
 import ipaddress
 import socket
+import xml.etree.ElementTree as ET # Для парсингу XML
 
-VERSION_BACKEND = "1.6.7"
+VERSION_BACKEND = "1.6.8"
 
 simulated_implants_be = []
 
@@ -34,7 +36,7 @@ CONCEPTUAL_CVE_DATABASE_BE = {
     "nginx 1.18.0": [{"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "A security issue in nginx resolver was identified, which might allow an attacker..."}]
 }
 
-def initialize_simulated_implants_be():
+def initialize_simulated_implants_be(): # Логіка (без змін від v1.6.7)
     global simulated_implants_be
     simulated_implants_be = []
     os_types = ["Windows_x64_10.0.22631", "Linux_x64_6.5.0", "Windows_Server_2022_Datacenter", "macOS_sonoma_14.1_arm64"]
@@ -55,7 +57,7 @@ def initialize_simulated_implants_be():
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = {
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.6.7)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -99,7 +101,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.6.7)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка...", "template_type": "python_stager_c2_beacon"},
@@ -113,8 +115,7 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     }
 }
 
-def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple[bool, dict, list[str]]:
-    # Логіка валідації (без змін від v1.6.6)
+def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple[bool, dict, list[str]]: # Логіка (без змін)
     validated_params = {}
     errors = []
     for param_name, rules in schema.items():
@@ -347,166 +348,241 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]: # Логіка 
     log.append("[RECON_BE_SUCCESS] Імітацію сканування портів завершено.")
     return log, "\n".join(results_text_lines)
 
-def parse_nmap_stdout_for_services(nmap_output: str) -> list[dict]:
+def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> list[dict]:
     """
-    Дуже базовий парсер для виводу nmap (-sV) для отримання портів, сервісів та версій.
-    Повертає список словників: [{"port": "80", "service": "http", "version": "Apache httpd 2.4.53"}]
+    Парсер для XML-виводу nmap (-oX) для отримання портів, сервісів та версій.
     """
     services_found = []
-    # Приклад рядка: 80/tcp  open  http    Apache httpd 2.4.53
-    # Або:          22/tcp  open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.4 (protocol 2.0)
-    # Regex для захоплення порту, статусу, сервісу та версії
-    # Цей regex є спрощеним і може потребувати доопрацювання для різних виводів nmap
-    service_line_regex = re.compile(r"(\d+)/tcp\s+open\s+(\S+)\s+(.*)")
-    for line in nmap_output.splitlines():
-        match = service_line_regex.match(line.strip())
-        if match:
-            port, service, version_full = match.groups()
-            # Очищення версії від зайвої інформації (наприклад, "(protocol 2.0)")
-            version_cleaned = version_full.split('(')[0].strip()
-            # Іноді nmap не дає версію, лише назву продукту
-            # Намагаємося знайти щось схоже на версію
-            version_parts = version_cleaned.split()
-            product_name = version_parts[0] if version_parts else service
+    try:
+        log_messages.append("[NMAP_XML_PARSE_INFO] Початок парсингу XML-виводу nmap.")
+        if not nmap_xml_output.strip():
+            log_messages.append("[NMAP_XML_PARSE_WARN] XML-вивід порожній.")
+            return services_found
+
+        root = ET.fromstring(nmap_xml_output)
+        
+        for host_node in root.findall('host'):
+            address_node = host_node.find('address')
+            host_ip = address_node.get('addr') if address_node is not None else "N/A"
             
-            # Спроба виділити лише продукт та версію для ключа CVE_DATABASE_BE
-            # Наприклад, "Apache httpd 2.4.53" -> "apache httpd 2.4.53"
-            # "OpenSSH 8.2p1 Ubuntu..." -> "openssh 8.2p1"
-            service_key_base = product_name.lower()
-            version_number_match = re.search(r"(\d+\.[\d\.\w-]+)", version_cleaned) # Шукаємо номер версії
-            
-            service_key_for_cve = service_key_base
-            if version_number_match:
-                service_key_for_cve = f"{service_key_base} {version_number_match.group(1)}"
-            
-            services_found.append({
-                "port": port,
-                "service_name": service, # Оригінальна назва сервісу від nmap
-                "version_info": version_cleaned, # Повна інформація про версію
-                "service_key_for_cve": service_key_for_cve # Ключ для пошуку в базі CVE
-            })
+            ports_node = host_node.find('ports')
+            if ports_node is None:
+                continue
+
+            for port_node in ports_node.findall('port'):
+                state_node = port_node.find('state')
+                if state_node is None or state_node.get('state') != 'open':
+                    continue # Обробляємо лише відкриті порти
+
+                port_id = port_node.get('portid')
+                protocol = port_node.get('protocol') # tcp, udp
+
+                service_node = port_node.find('service')
+                service_name = service_node.get('name', 'unknown') if service_node is not None else 'unknown'
+                product_name = service_node.get('product', '') if service_node is not None else ''
+                version_number = service_node.get('version', '') if service_node is not None else ''
+                extrainfo = service_node.get('extrainfo', '') if service_node is not None else ''
+                
+                version_info_parts = [product_name, version_number, extrainfo]
+                version_info_full = " ".join(part for part in version_info_parts if part).strip()
+                if not version_info_full:
+                    version_info_full = service_name # Якщо немає деталей, використовуємо назву сервісу
+
+                # Формування ключа для бази CVE
+                service_key_for_cve = product_name.lower().strip() if product_name else service_name.lower().strip()
+                if version_number:
+                    service_key_for_cve += f" {version_number.lower().strip()}"
+                
+                # Якщо продукт не визначено, а є лише назва сервісу, використовуємо її
+                if not product_name and service_name != 'unknown':
+                     service_key_for_cve = service_name.lower().strip()
+                     # Спробуємо знайти версію в extrainfo, якщо product не вказано
+                     if not version_number and extrainfo:
+                         version_match_extra = re.search(r"(\d+\.[\d\.\w-]+)", extrainfo)
+                         if version_match_extra:
+                             service_key_for_cve += f" {version_match_extra.group(1).lower().strip()}"
+
+
+                services_found.append({
+                    "host_ip": host_ip,
+                    "port": port_id,
+                    "protocol": protocol,
+                    "service_name": service_name,
+                    "product": product_name,
+                    "version_number": version_number,
+                    "extrainfo": extrainfo,
+                    "version_info_full": version_info_full, # Повна зібрана інформація про версію
+                    "service_key_for_cve": service_key_for_cve.strip()
+                })
+        log_messages.append(f"[NMAP_XML_PARSE_SUCCESS] Успішно розпарсено XML, знайдено {len(services_found)} відкритих сервісів.")
+    except ET.ParseError as e_parse:
+        log_messages.append(f"[NMAP_XML_PARSE_ERROR] Помилка парсингу XML: {e_parse}")
+    except Exception as e_generic:
+        log_messages.append(f"[NMAP_XML_PARSE_FATAL] Непередбачена помилка під час парсингу XML: {e_generic}")
     return services_found
 
-def conceptual_cve_lookup_be(services_info: list, log_messages: list) -> list[dict]:
-    """
-    Симуляція пошуку CVE для виявлених сервісів та версій.
-    services_info: список словників від parse_nmap_stdout_for_services.
-    """
+
+def conceptual_cve_lookup_be(services_info: list, log_messages: list) -> list[dict]: # Оновлено для роботи з XML-даними
     found_cves = []
-    log_messages.append(f"[CVE_LOOKUP_BE_INFO] Пошук CVE для {len(services_info)} виявлених сервісів.")
+    log_messages.append(f"[CVE_LOOKUP_BE_INFO] Пошук CVE для {len(services_info)} виявлених сервісів (з XML).")
     for service_item in services_info:
-        service_key = service_item.get("service_key_for_cve", "").lower().strip()
-        # Пробуємо знайти точне співпадіння
-        cves = CONCEPTUAL_CVE_DATABASE_BE.get(service_key)
+        service_key_raw = service_item.get("service_key_for_cve", "").lower().strip()
         
-        # Якщо точного співпадіння немає, спробуємо знайти за частковим (наприклад, лише назва сервісу без версії)
-        if not cves:
-            base_service_name = service_key.split(' ')[0]
-            for db_key, db_cves in CONCEPTUAL_CVE_DATABASE_BE.items():
-                if db_key.startswith(base_service_name):
-                    cves = db_cves # Беремо перше співпадіння, це дуже спрощено
-                    log_messages.append(f"[CVE_LOOKUP_BE_DEBUG] Часткове співпадіння для '{service_key}' -> знайдено CVE для '{db_key}'.")
-                    break
+        # Спробуємо різні варіанти ключа для більшої гнучкості
+        # 1. Точний ключ (продукт + версія)
+        # 2. Лише продукт (якщо є)
+        # 3. Лише назва сервісу (якщо продукт не визначено)
         
-        if cves:
-            log_messages.append(f"[CVE_LOOKUP_BE_SUCCESS] Знайдено CVE для сервісу '{service_key}' на порту {service_item.get('port')}:")
-            for cve_entry in cves:
+        possible_keys = [service_key_raw]
+        product_only = service_item.get("product", "").lower().strip()
+        if product_only and product_only != service_key_raw:
+            possible_keys.append(product_only)
+        
+        service_name_only = service_item.get("service_name", "").lower().strip()
+        if service_name_only and service_name_only != service_key_raw and service_name_only != product_only:
+            possible_keys.append(service_name_only)
+
+        cves_for_service = []
+        for key_attempt in possible_keys:
+            if not key_attempt: continue
+            
+            # Точне співпадіння
+            if key_attempt in CONCEPTUAL_CVE_DATABASE_BE:
+                cves_for_service.extend(CONCEPTUAL_CVE_DATABASE_BE[key_attempt])
+                log_messages.append(f"[CVE_LOOKUP_BE_DEBUG] Точне співпадіння для ключа '{key_attempt}' (порт {service_item.get('port')}).")
+                break # Знайшли, далі не шукаємо для цього сервісу за іншими ключами
+
+            # Часткове співпадіння (наприклад, "apache httpd" для "apache httpd 2.4.x")
+            for db_key, db_cves_list in CONCEPTUAL_CVE_DATABASE_BE.items():
+                if key_attempt.startswith(db_key.split(' ')[0]) and key_attempt in db_key: # "apache httpd" in "apache httpd 2.4.53"
+                    cves_for_service.extend(db_cves_list)
+                    log_messages.append(f"[CVE_LOOKUP_BE_DEBUG] Часткове співпадіння для '{key_attempt}' -> знайдено CVE для '{db_key}' (порт {service_item.get('port')}).")
+                    # Не робимо break, щоб зібрати всі можливі часткові співпадіння, але це може дати дублікати.
+                    # Поки що залишимо так для концепту.
+        
+        # Унікалізація CVE, якщо були дублікати через часткові співпадіння
+        unique_cve_ids_for_service = set()
+        final_cves_for_this_service = []
+        for cve_entry in cves_for_service:
+            if cve_entry['cve_id'] not in unique_cve_ids_for_service:
+                final_cves_for_this_service.append(cve_entry)
+                unique_cve_ids_for_service.add(cve_entry['cve_id'])
+
+        if final_cves_for_this_service:
+            log_messages.append(f"[CVE_LOOKUP_BE_SUCCESS] Знайдено CVE для сервісу '{service_key_raw}' (порт {service_item.get('port')}):")
+            for cve_entry in final_cves_for_this_service:
                 log_messages.append(f"  - {cve_entry['cve_id']} ({cve_entry['severity']}): {cve_entry['summary'][:70]}...")
                 found_cves.append({
                     "port": service_item.get("port"),
-                    "service_key": service_key,
+                    "service_key": service_key_raw, # Оригінальний ключ для звіту
+                    "matched_db_key": key_attempt, # Ключ, за яким спрацювало співпадіння
                     "cve_id": cve_entry['cve_id'],
                     "severity": cve_entry['severity'],
                     "summary": cve_entry['summary']
                 })
-        else:
-            log_messages.append(f"[CVE_LOOKUP_BE_INFO] CVE не знайдено для сервісу '{service_key}' на порту {service_item.get('port')} у концептуальній базі.")
+        elif service_key_raw: # Логуємо, лише якщо був ключ для пошуку
+            log_messages.append(f"[CVE_LOOKUP_BE_INFO] CVE не знайдено для сервісу '{service_key_raw}' (порт {service_item.get('port')}) у концептуальній базі.")
             
     if not found_cves:
-        log_messages.append("[CVE_LOOKUP_BE_INFO] Відповідних CVE не знайдено в концептуальній базі.")
+        log_messages.append("[CVE_LOOKUP_BE_INFO] Відповідних CVE не знайдено в концептуальній базі для жодного сервісу.")
     return found_cves
 
 
-def perform_nmap_scan_be(target: str, options: list = None, parse_services: bool = False) -> tuple[list[str], str, list[dict]]:
-    log = [f"[RECON_NMAP_BE_INFO] Запуск nmap сканування для цілі: {target} з опціями: {options}, парсинг сервісів: {parse_services}"]
+def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool = False) -> tuple[list[str], str, list[dict]]:
+    """
+    Виконує сканування nmap. Може повертати текстовий або XML вивід (якщо use_xml_output=True).
+    Якщо use_xml_output=True, третій елемент кортежу буде списком розпарсених сервісів.
+    """
+    log = [f"[RECON_NMAP_BE_INFO] Запуск nmap для: {target}, опції: {options}, XML: {use_xml_output}"]
     base_command = ["nmap"]
-    # Завжди додаємо -sV, якщо потрібен парсинг сервісів, і його немає в опціях
-    if parse_services and options and not any("-sV" in opt for opt in options):
-        options.append("-sV")
-    elif parse_services and not options:
-        options = ["-sV"]
+    
+    effective_options = list(options) if options else []
 
+    if use_xml_output:
+        # Переконуємося, що -oX - є, і немає інших -oX <файл>
+        xml_output_option_present = any("-oX" in opt for opt in effective_options)
+        if not xml_output_option_present:
+            effective_options.append("-oX")
+            effective_options.append("-") # Вивід XML в stdout
+        # Переконуємося, що -sV є, якщо потрібен XML для парсингу сервісів
+        if not any("-sV" in opt for opt in effective_options):
+             effective_options.append("-sV")
+    
+    # Загальні рекомендовані опції, якщо не вказано інше
+    if not effective_options:
+        effective_options = ["-sV", "-T4", "-Pn"] if not use_xml_output else ["-sV", "-T4", "-Pn", "-oX", "-"]
 
-    if options:
-        allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX"] # Додано -oX для XML виводу
-        safe_options = []
-        temp_options_iter = iter(options) # Створюємо ітератор для обробки опцій з аргументами
-        for opt_part in temp_options_iter:
-            # Перевіряємо, чи опція починається з дозволеного префіксу
-            if any(opt_part.startswith(p) for p in allowed_options_prefixes):
-                safe_options.append(opt_part)
-                # Якщо опція вимагає аргумент (наприклад, -p 1-1000, --top-ports 100, -oX -)
-                if opt_part == "-p" or opt_part == "--top-ports" or opt_part == "-oX":
+    # Валідація та фільтрація опцій (спрощена)
+    allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX", "-oN", "-oG", "-iL"]
+    final_command_parts = [base_command[0]] # nmap
+    
+    # Обробка опцій, щоб уникнути дублювання та конфліктів
+    # Це спрощена логіка, реальна обробка опцій nmap складніша
+    seen_options = set()
+    opts_iter = iter(effective_options)
+    for opt in opts_iter:
+        main_opt = opt.split(' ')[0] # Основна частина опції, наприклад, -p з -p 1-1000
+        if main_opt not in seen_options:
+            if any(opt.startswith(p) for p in allowed_options_prefixes):
+                final_command_parts.append(opt)
+                seen_options.add(main_opt)
+                if main_opt in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL"]: # Опції, що можуть мати аргумент
                     try:
-                        # Наступний елемент в options має бути аргументом цієї опції
-                        arg = next(temp_options_iter)
-                        safe_options.append(arg)
+                        arg = next(opts_iter)
+                        final_command_parts.append(arg)
                     except StopIteration:
-                        # Якщо аргумент відсутній, це може бути помилкою або опція використовується без нього (наприклад, -oX без імені файлу -> stdout)
-                        # Для -oX, якщо немає аргументу, nmap може вивести в stdout, що не підходить для парсингу тут.
-                        # Для -p, --top-ports відсутність аргументу є помилкою.
-                        log.append(f"[RECON_NMAP_BE_WARN] Опція {opt_part} може очікувати аргумент, але його не надано або він оброблений неправильно.")
-            # Дозволяємо прості числові аргументи або діапазони (для -p)
-            elif opt_part.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt_part):
-                 safe_options.append(opt_part)
+                        if main_opt == "-oX" and opt == "-oX": # Якщо -oX без аргументу, додаємо "-"
+                            final_command_parts.append("-")
+                        else:
+                            log.append(f"[RECON_NMAP_BE_WARN] Опція {opt} очікує аргумент, але його не надано.")
+            elif opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt): # Аргументи для опцій
+                 final_command_parts.append(opt) # Додаємо, якщо це аргумент попередньої опції
             else:
-                log.append(f"[RECON_NMAP_BE_WARN] Недозволена або невідома опція nmap: {opt_part}")
-        
-        # Якщо parse_services=True і -oX - не було вказано, додаємо його для XML виводу
-        # Але це ускладнить прямий stdout. Для простоти, поки що парсимо stdout.
-        # Якщо потрібен XML, то логіка парсингу має бути іншою.
-        # Поки що залишаємо парсинг stdout.
+                 log.append(f"[RECON_NMAP_BE_WARN] Недозволена або невідома опція nmap: {opt}")
 
-        base_command.extend(safe_options)
-    else: # Стандартний набір опцій, якщо не вказано
-        base_command.extend(["-sV", "-T4", "-Pn"]) # -sV для версій, -Pn може бути необхідним
 
-    base_command.append(target)
-    log.append(f"[RECON_NMAP_BE_CMD] Команда nmap: {' '.join(base_command)}")
+    final_command_parts.append(target)
+    log.append(f"[RECON_NMAP_BE_CMD] Команда nmap: {' '.join(final_command_parts)}")
     
     parsed_services_list = []
-    results_text = ""
+    raw_output_text = "" # Для текстового або XML виводу
 
     try:
-        process = subprocess.run(base_command, capture_output=True, text=True, timeout=300, check=False)
+        process = subprocess.run(final_command_parts, capture_output=True, text=True, timeout=360, check=False) # Збільшено timeout до 6 хвилин
+        
+        raw_output_text = process.stdout if process.returncode == 0 else process.stderr
         
         if process.returncode == 0:
             log.append("[RECON_NMAP_BE_SUCCESS] Nmap сканування успішно завершено.")
-            results_text = f"Результати Nmap сканування для: {target}\n\n{process.stdout}"
-            if parse_services:
-                parsed_services_list = parse_nmap_stdout_for_services(process.stdout)
-                log.append(f"[RECON_NMAP_BE_PARSE] Знайдено {len(parsed_services_list)} сервісів для аналізу CVE.")
+            if use_xml_output:
+                # `raw_output_text` тут містить XML
+                parsed_services_list = parse_nmap_xml_output_for_services(raw_output_text, log)
+                log.append(f"[RECON_NMAP_BE_PARSE_XML] Знайдено {len(parsed_services_list)} сервісів з XML для аналізу CVE.")
+                # Для звіту можемо повернути короткий підсумок або сам XML
+                # results_text_for_display = f"XML вивід Nmap для {target} отримано. Знайдено сервісів: {len(parsed_services_list)}"
+                results_text_for_display = raw_output_text # Повертаємо весь XML для детального перегляду
+            else:
+                results_text_for_display = f"Результати Nmap сканування для: {target}\n\n{raw_output_text}"
         else:
-            error_message = f"Помилка виконання Nmap (код: {process.returncode}): {process.stderr}"
+            error_message = f"Помилка виконання Nmap (код: {process.returncode}): {raw_output_text}"
             log.append(f"[RECON_NMAP_BE_ERROR] {error_message}")
-            results_text = f"Помилка Nmap сканування для {target}:\n{error_message}"
-            if "Host seems down" in process.stdout or "Host seems down" in process.stderr:
-                 results_text += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
-            elif " consentement explicite" in process.stderr or "explicit permission" in process.stderr :
-                 results_text += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
-
+            results_text_for_display = f"Помилка Nmap сканування для {target}:\n{error_message}"
+            if "Host seems down" in raw_output_text:
+                 results_text_for_display += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
+            elif " consentement explicite" in raw_output_text or "explicit permission" in raw_output_text :
+                 results_text_for_display += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
 
     except FileNotFoundError:
         log.append("[RECON_NMAP_BE_ERROR] Команду nmap не знайдено.")
-        results_text = "Помилка: nmap не встановлено або не знайдено в системному PATH."
+        results_text_for_display = "Помилка: nmap не встановлено або не знайдено в системному PATH."
     except subprocess.TimeoutExpired:
         log.append("[RECON_NMAP_BE_ERROR] Час очікування nmap сканування вичерпано.")
-        results_text = f"Помилка: Час очікування сканування nmap для {target} вичерпано (5 хвилин)."
+        results_text_for_display = f"Помилка: Час очікування сканування nmap для {target} вичерпано."
     except Exception as e:
         log.append(f"[RECON_NMAP_BE_FATAL] Непередбачена помилка: {str(e)}")
-        results_text = f"Непередбачена помилка під час nmap сканування: {str(e)}"
+        results_text_for_display = f"Непередбачена помилка під час nmap сканування: {str(e)}"
     
-    return log, results_text, parsed_services_list
+    return log, results_text_for_display, parsed_services_list
 
 
 def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]: # Логіка (без змін)
@@ -784,24 +860,31 @@ def handle_run_recon():
         
         recon_results_text = ""
         recon_log_additions = [] 
-        parsed_services = [] # Для зберігання результатів парсингу сервісів
-        cve_results = [] # Для зберігання результатів пошуку CVE
+        parsed_services = [] 
+        cve_results = [] 
 
         if recon_type == "port_scan_basic": 
             recon_log_additions, recon_results_text = simulate_port_scan_be(target)
         elif recon_type == "port_scan_nmap_standard":
-            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else ["-sV", "-T4", "-Pn"] # Додаємо -sV за замовчуванням
-            if not any("-sV" in opt for opt in nmap_options_list): # Переконуємося, що -sV є для парсингу
-                nmap_options_list.append("-sV")
-            recon_log_additions, recon_results_text, parsed_services = perform_nmap_scan_be(target, options=nmap_options_list, parse_services=True)
-        elif recon_type == "port_scan_nmap_cve_basic": # Новий тип розвідки
-            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else ["-sV", "-T4", "-Pn"] # -sV обов'язково
-            if not any("-sV" in opt for opt in nmap_options_list):
-                nmap_options_list.append("-sV")
-            
-            recon_log_additions_nmap, recon_results_text_nmap, parsed_services_nmap = perform_nmap_scan_be(target, options=nmap_options_list, parse_services=True)
+            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else ["-sV", "-T4", "-Pn"]
+            # Для цього типу ми не парсимо XML, просто повертаємо текстовий вивід
+            recon_log_additions, recon_results_text, _ = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=False)
+        elif recon_type == "port_scan_nmap_cve_basic":
+            # Для CVE пошуку, nmap завжди викликається з XML виводом для парсингу
+            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else []
+            # Переконуємося, що опції для XML та версій є
+            if not any("-sV" in opt for opt in nmap_options_list): nmap_options_list.append("-sV")
+            # -oX - вже додається в perform_nmap_scan_be, якщо use_xml_output=True
+
+            recon_log_additions_nmap, nmap_xml_data, parsed_services_nmap = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=True)
             recon_log_additions.extend(recon_log_additions_nmap)
-            recon_results_text = recon_results_text_nmap # Початковий результат - вивід nmap
+            
+            # Показуємо користувачу XML або повідомлення про помилку
+            recon_results_text = f"Nmap XML Output for {target} (used for CVE lookup):\n\n"
+            if parsed_services_nmap or "Nmap сканування успішно завершено" in "".join(recon_log_additions_nmap): # Якщо є сервіси або сканування успішне
+                 recon_results_text += nmap_xml_data if nmap_xml_data else "XML-дані не отримано, але сканування могло бути успішним."
+            else: # Якщо були помилки nmap
+                 recon_results_text = nmap_xml_data # Тут буде повідомлення про помилку від nmap
 
             if parsed_services_nmap:
                 cve_log_additions = []
@@ -810,13 +893,14 @@ def handle_run_recon():
                 if cve_results:
                     recon_results_text += "\n\n--- Концептуальний Пошук CVE ---\n"
                     for cve in cve_results:
-                        recon_results_text += f"Порт: {cve['port']}, Сервіс: {cve['service_key']}\n"
+                        recon_results_text += f"Порт: {cve['port']}, Сервіс: {cve['service_key']} (Зіставлено з: {cve.get('matched_db_key', 'N/A')})\n"
                         recon_results_text += f"  CVE ID: {cve['cve_id']} (Рівень: {cve['severity']})\n"
                         recon_results_text += f"  Опис: {cve['summary']}\n\n"
                 else:
                     recon_results_text += "\n\n--- Концептуальний Пошук CVE ---\nВідповідних CVE не знайдено в концептуальній базі.\n"
-            else:
-                recon_results_text += "\n\n--- Концептуальний Пошук CVE ---\nСервіси для аналізу CVE не знайдено (або помилка парсингу nmap).\n"
+            elif "Nmap сканування успішно завершено" in "".join(recon_log_additions_nmap): # Сканування успішне, але сервіси не розпарсено
+                 recon_results_text += "\n\n--- Концептуальний Пошук CVE ---\nНе вдалося розпарсити сервіси з XML-виводу nmap для пошуку CVE.\n"
+            # Якщо сканування nmap не було успішним, повідомлення про помилку вже в recon_results_text
 
         elif recon_type == "osint_email_search":
             recon_log_additions, recon_results_text = simulate_osint_email_search_be(target)
