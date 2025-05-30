@@ -145,7 +145,7 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.6.GUI</p> </header>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.7.GUI</p> </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
@@ -356,6 +356,9 @@
                 <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">Результати Розвідки:</h3>
                 <div id="reconResultsOutput" class="output-area"></div>
                 <div id="reconLog" class="output-area mt-4 text-sm text-gray-400" style="max-height: 150px;"></div>
+                <p class="text-xs text-gray-500 mt-2">
+                    Примітка: Результати Nmap сканувань на CVE тепер можуть включати інформацію про джерело даних (внутрішня база / імітація зовнішнього API), відповідно до можливостей backend v1.9.7+.
+                </p>
             </div>
         </div>
 
