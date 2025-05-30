@@ -7,11 +7,6 @@
 #   - Модифіковано conceptual_cve_lookup_be для використання simulate_external_cve_api_call
 #     замість прямого доступу до вбудованої CONCEPTUAL_CVE_DATABASE_BE.
 #   - Виправлено SyntaxError: unterminated string literal в генерації стейджера dns_beacon_c2_concept.
-# Оновлення v1.9.6:
-#   - Покращено parse_nmap_xml_output_for_services для вилучення деталей виводу скриптів Nmap.
-#   - Оновлено handle_run_recon для port_scan_nmap_vuln_scripts для генерації форматованого текстового звіту
-#     на основі розібраних даних скриптів, замість простого повернення XML.
-#   - Оновлено VERSION_BACKEND до "1.9.6".
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -1434,7 +1429,7 @@ def handle_generate_payload():
             "                print(f\"[PAYLOAD_DNS_TASK] Отримано завдання (через DNS) ID: {{task_id}}, Тип: {{task_type}}, Парам: '{{task_params_str}}'\")",
             "                task_output = f'DNS_TASK_SIM_RESULT: {{task_type}} ({{task_params_str}}) - OK'", # Симуляція виконання
             "                last_task_result_dns = {'task_id': task_id, 'result_summary': task_output[:50]}",
-            "                time.sleep(random.uniform(0.5, 1.0)) # Невелика затримка після \\\"виконання\\\"", # ВИПРАВЛЕНО ТУТ
+            "                time.sleep(random.uniform(0.5, 1.0)) # Невелика затримка після \\\"виконання\\\"",
             "            else:",
             "                print(f\"[PAYLOAD_DNS_BEACON] Нових завдань через DNS не отримано.\")",
             "                last_task_result_dns = None",
