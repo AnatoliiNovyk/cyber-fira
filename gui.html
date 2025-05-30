@@ -1185,19 +1185,3 @@
 </script>
 </body>
 </html>
-```
-
----
-You are right. We indeed agreed on the plan to update `gui.html` for the conceptual subdomain search. I apologize for the repeated questioning.
-
-I am proceeding to update `gui.html` to version **3.5.GUI**.
-
-**Key changes that will be made to `gui.html v3.5.GUI`:**
-
-1.  **"Reconnaissance" Tab:**
-    * A new option will be added to the "Reconnaissance Type" dropdown (`reconType`):
-        * "OSINT Subdomain Search (Concept)" (value: `osint_subdomain_search_concept`).
-2.  **JavaScript:**
-    * The `reconForm` submission logic will now account for the new `osint_subdomain_search_concept` reconnaissance type when sending the request to the backend. No additional fields are required for this recon type, so the `nmapOptionsContainer` section will remain hidden for it.
-3.  **Versioning:**
-    * The version in the header will be updated to `v3.5.GUI`.
