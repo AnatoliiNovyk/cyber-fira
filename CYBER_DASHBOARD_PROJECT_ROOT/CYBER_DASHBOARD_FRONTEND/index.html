@@ -1,1 +1,225 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syntax Framework - Контрольна Панель (Концепт)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css"> <style>
+        /* Мінімальні стилі, що були в gui.html, можна залишити тут або перенести в style.css */
+        body { font-family: 'Inter', sans-serif; }
+        .tab-button {
+            padding: 0.75rem 1.0rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .tab-button.active {
+            border-color: #6366F1; /* indigo-500 */
+            color: #A5B4FC; /* indigo-300 */
+        }
+        .tab-button:hover {
+            background-color: rgba(99, 102, 241, 0.1);
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.5s; }
 
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .form-section { transition: all 0.3s ease-in-out; }
+        .form-section.hidden { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #4B5563; /* gray-600 */
+            border-radius: 0.375rem; /* rounded-md */
+            background-color: #374151; /* gray-700 */
+            color: #F3F4F6; /* gray-100 */
+            box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+            outline: 2px solid transparent;
+            outline-offset: 2px;
+            border-color: #6366F1; /* indigo-500 */
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        .checkbox-label { display: flex; align-items: center; margin-bottom: 0.5rem; }
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 0.5rem;
+            height: 1rem;
+            width: 1rem;
+            border-radius: 0.25rem;
+            border-color: #4B5563; /* gray-600 */
+            background-color: #374151; /* gray-700 */
+            color: #6366F1;
+        }
+        .checkbox-label input[type="checkbox"]:focus {
+            ring: 2px; 
+            ring-offset: 2px; 
+            ring-color: #818CF8; 
+        }
+        button {
+            background-color: #4F46E5; /* indigo-600 */
+            color: white;
+            font-weight: 600;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.375rem; /* rounded-md */
+            transition: background-color 0.15s ease-in-out;
+            display: inline-flex; 
+            align-items: center; 
+            justify-content: center; 
+        }
+        button:hover {
+            background-color: #4338CA; /* indigo-700 */
+        }
+        button:disabled {
+            background-color: #6B7280; /* gray-500 */
+            cursor: not-allowed;
+        }
+        .output-area {
+            background-color: #111827; /* gray-900 */
+            color: #D1D5DB; /* gray-300 */
+            padding: 1rem;
+            border-radius: 0.375rem; /* rounded-md */
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px; 
+            overflow-y: auto;
+            border: 1px solid #374151; /* gray-700 */
+        }
+        .error-message {
+            color: #F87171; /* red-400 */
+            font-size: 0.875rem; /* text-sm */
+            margin-top: 0.25rem;
+        }
+        .implant-list-item {
+            padding: 0.75rem;
+            border: 1px solid #4B5563; /* gray-600 */
+            border-radius: 0.375rem; /* rounded-md */
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .implant-list-item:hover, .implant-list-item.selected {
+            background-color: #374151; /* gray-700 */
+            border-color: #6366F1; /* indigo-500 */
+        }
+        .log-entry {
+            padding: 0.5rem;
+            border-bottom: 1px solid #374151; /* gray-700 */
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        .log-info { color: #9CA3AF; } /* gray-400 */
+        .log-warning { color: #FBBF24; } /* amber-400 */
+        .log-error { color: #F87171; } /* red-400 */
+        .log-success { color: #34D399; } /* green-400 */
+         .spinner {
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            width: 1rem; 
+            height: 1rem; 
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .sub-header {
+            font-size: 1.125rem; /* text-lg */
+            font-weight: 600; /* font-semibold */
+            margin-bottom: 0.75rem; /* mb-3 */
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-black text-gray-200 min-h-screen flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
+
+    <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700">
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.8.GUI-Refactored</p> </header>
+
+        <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
+            <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
+            <button class="tab-button" data-tab="reconnaissanceTab">Розвідка</button>
+            <button class="tab-button" data-tab="c2ControlTab">C2 Управління</button>
+            <button class="tab-button" data-tab="loggingAdaptationTab">Логи & Адаптація</button>
+        </div>
+
+        <div id="payloadGeneratorTab" class="tab-content active">
+            <h2 class="text-2xl font-semibold mb-4 text-indigo-300">Конфігурація Пейлоада</h2>
+            <form id="payloadGeneratorForm" class="space-y-6">
+                <div>
+                    <label for="payloadArchetype" class="text-gray-300">Архетип Пейлоада:</label>
+                    <select id="payloadArchetype" name="payload_archetype" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="">-- Оберіть архетип --</option>
+                        </select>
+                    <div id="error-payloadArchetype" class="error-message"></div>
+                </div>
+                <div id="archetypeParamsContainer" class="space-y-4">
+                    </div>
+                <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                     <h3 class="sub-header text-indigo-400">Загальні Налаштування Пейлоада</h3>
+                    </div>
+                <div class="pt-2">
+                    <button type="submit" id="generatePayloadButton" class="w-full">
+                        <span class="button-text">Згенерувати Пейлоад</span>
+                        <span class="button-spinner hidden"><div class="spinner inline-block align-middle"></div> Обробка...</span>
+                    </button>
+                </div>
+            </form>
+            <div id="payloadOutputSection" class="mt-8 hidden">
+                <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">Згенерований Стейджер:</h3>
+                <div id="payloadStagerOutput" class="output-area"></div>
+                <div id="payloadGenerationLog" class="output-area mt-4 text-sm text-gray-400" style="max-height: 150px;"></div>
+            </div>
+        </div>
+
+        <div id="reconnaissanceTab" class="tab-content">
+            <h2 class="text-2xl font-semibold mb-4 text-teal-300">Модуль Розвідки</h2>
+            <form id="reconForm" class="space-y-6">
+                <div class="pt-2">
+                    <button type="submit" id="startReconButton" class="w-full bg-teal-600 hover:bg-teal-700">
+                        <span class="button-text">Запустити Розвідку</span>
+                        <span class="button-spinner hidden"><div class="spinner inline-block align-middle"></div> Обробка...</span>
+                    </button>
+                </div>
+            </form>
+             <div id="reconOutputSection" class="mt-8 hidden">
+                </div>
+        </div>
+
+        <div id="c2ControlTab" class="tab-content">
+            <h2 class="text-2xl font-semibold mb-4 text-red-400">C2 Управління (Імітація)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                </div>
+            <div id="c2OutputSection" class="mt-8">
+                </div>
+        </div>
+
+        <div id="loggingAdaptationTab" class="tab-content">
+            <h2 class="text-2xl font-semibold mb-4 text-lime-300">Логування та Адаптація (Імітація)</h2>
+            <div class="space-y-6">
+                </div>
+        </div>
+    </div>
+
+    <script src="js/api.js" defer></script>
+    <script src="js/ui_utils.js" defer></script>
+    <script src="js/tabs_navigation.js" defer></script>
+    <script src="js/payload_generator_ui.js" defer></script>
+    <script src="js/reconnaissance_ui.js" defer></script>
+    <script src="js/c2_control_ui.js" defer></script>
+    <script src="js/logging_adaptation_ui.js" defer></script>
+    <script src="js/main.js" defer></script> 
+</body>
+</html>
