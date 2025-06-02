@@ -8,7 +8,7 @@ VERSION_BACKEND = "1.9.8" # Або нова версія після рефакт
 
 # Конфігурація NVD API
 NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-NVD_API_KEY = os.environ.get("a6348814-07e4-4613-9a2b-ce3dcc311c25") # Завантажуватиметься з os.environ.get("NVD_API_KEY") в app_core.py або reconnaissance/logic.py
+NVD_API_KEY = os.environ.get("NVD_API_KEY") # Завантажуватиметься з os.environ.get("NVD_API_KEY") в app_core.py або reconnaissance/logic.py
 NVD_REQUEST_TIMEOUT_SECONDS = 15
 NVD_RESULTS_PER_PAGE = 20
 
