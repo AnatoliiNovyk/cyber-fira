@@ -1,6 +1,8 @@
 # config.py
 # Конфігураційні змінні, константи, схеми та бази даних для CYBER DASHBOARD
 
+import os
+
 # Версія Backend
 VERSION_BACKEND = "1.9.8" # Або нова версія після рефакторингу, наприклад, "2.0.0-refactored"
 
