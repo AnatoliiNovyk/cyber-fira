@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Syntax Framework - Контрольна Панель (Концепт)</title>
+    <title>Syntax Framework - Контрольна Панель</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="css/style.css"> <style>
         /* Мінімальні стилі, що були в gui.html, можна залишити тут або перенести в style.css */
@@ -58,12 +58,13 @@
             border-radius: 0.25rem;
             border-color: #4B5563; /* gray-600 */
             background-color: #374151; /* gray-700 */
-            color: #6366F1;
+            color: #6366F1; /* indigo-500 */
+            accent-color: #6366F1; /* Для кращого вигляду чекбокса */
         }
         .checkbox-label input[type="checkbox"]:focus {
             ring: 2px; 
             ring-offset: 2px; 
-            ring-color: #818CF8; 
+            ring-color: #818CF8; /* indigo-400 */
         }
         button {
             background-color: #4F46E5; /* indigo-600 */
@@ -115,6 +116,7 @@
         .log-entry {
             padding: 0.5rem;
             border-bottom: 1px solid #374151; /* gray-700 */
+            font-size: 0.875rem; /* text-sm */
         }
         .log-entry:last-child {
             border-bottom: none;
@@ -146,7 +148,8 @@
     <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-gray-700">
         <header class="mb-6 text-center">
             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-500 to-pink-500">Syntax Framework</h1>
-            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.8.GUI-Refactored</p> </header>
+            <p class="text-lg text-gray-400 mt-1">Контрольна Панель v3.8.GUI-Refactored</p>
+        </header>
 
         <div class="mb-6 border-b border-gray-700 flex overflow-x-auto">
             <button class="tab-button active" data-tab="payloadGeneratorTab">Генератор Пейлоадів</button>
@@ -165,11 +168,143 @@
                         </select>
                     <div id="error-payloadArchetype" class="error-message"></div>
                 </div>
+
                 <div id="archetypeParamsContainer" class="space-y-4">
+                    <div id="params_demo_echo_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="sub-header text-indigo-400">Параметри Ехо-Пейлоада</h3>
+                        <div>
+                            <label for="messageToEcho" class="text-gray-300">Повідомлення для Ехо:</label>
+                            <input type="text" id="messageToEcho" name="messageToEcho" placeholder="Введіть повідомлення" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-messageToEcho" class="error-message"></div>
+                        </div>
                     </div>
+                    <div id="params_demo_file_lister_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="sub-header text-indigo-400">Параметри Переліку Файлів</h3>
+                        <div>
+                            <label for="directoryToList" class="text-gray-300">Директорія для Переліку (за замовч. '.'):</label>
+                            <input type="text" id="directoryToList" name="directoryToList" placeholder="." class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-directoryToList" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_demo_c2_beacon_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="sub-header text-indigo-400">Параметри C2 Маячка (HTTP)</h3>
+                        <div>
+                            <label for="c2BeaconEndpoint" class="text-gray-300">URL Ендпоінта Маячка C2:</label>
+                            <input type="text" id="c2BeaconEndpoint" name="c2BeaconEndpoint" placeholder="http://localhost:5000/api/c2/beacon_receiver" value="http://localhost:5000/api/c2/beacon_receiver" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-c2BeaconEndpoint" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_reverse_shell_tcp" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                        <h3 class="sub-header text-indigo-400">Параметри Reverse Shell TCP</h3>
+                        <div>
+                            <label for="c2TargetHostShell" class="text-gray-300">Хост C2 (LHOST - IP):</label>
+                            <input type="text" id="c2TargetHostShell" name="c2TargetHostShell" placeholder="напр. 192.168.1.100" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-c2TargetHostShell" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="c2TargetPortShell" class="text-gray-300">Порт C2 (LPORT - 1-65535):</label>
+                            <input type="number" id="c2TargetPortShell" name="c2TargetPortShell" placeholder="напр. 4444" min="1" max="65535" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-c2TargetPortShell" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="shellcodeHexPlaceholder" class="text-gray-300">Шеллкод (HEX, з DEADBEEFCAFE для LHOST/LPORT):</label>
+                            <textarea id="shellcodeHexPlaceholder" name="shellcodeHexPlaceholder" rows="3" placeholder="DEADBEEFCAFE..." class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400"></textarea>
+                            <div id="error-shellcodeHexPlaceholder" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_powershell_downloader_stager" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                        <h3 class="sub-header text-indigo-400">Параметри PowerShell Downloader</h3>
+                        <div>
+                            <label for="powershellScriptUrl" class="text-gray-300">URL PowerShell Скрипта (.ps1):</label>
+                            <input type="text" id="powershellScriptUrl" name="powershellScriptUrl" placeholder="https://example.com/script.ps1" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-powershellScriptUrl" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="powershellExecutionArgs" class="text-gray-300">Аргументи Виконання PowerShell (опціонально):</label>
+                            <input type="text" id="powershellExecutionArgs" name="powershellExecutionArgs" value="-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-powershellExecutionArgs" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_dns_beacon_c2_concept" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                        <h3 class="sub-header text-indigo-400">Параметри DNS C2 Маячка</h3>
+                        <div>
+                            <label for="c2DnsZone" class="text-gray-300">DNS Зона C2:</label>
+                            <input type="text" id="c2DnsZone" name="c2DnsZone" value="syntax-c2.net" placeholder="syntax-c2.net" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-c2DnsZone" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="dnsBeaconSubdomainPrefix" class="text-gray-300">Префікс Субдомену для DNS Маячка:</label>
+                            <input type="text" id="dnsBeaconSubdomainPrefix" name="dnsBeaconSubdomainPrefix" value="api" placeholder="api" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-dnsBeaconSubdomainPrefix" class="error-message"></div>
+                        </div>
+                    </div>
+                    <div id="params_windows_simple_persistence_stager" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
+                        <h3 class="sub-header text-indigo-400">Параметри Windows Persistence Stager</h3>
+                        <div>
+                            <label for="persistenceMethod" class="text-gray-300">Метод Персистентності:</label>
+                            <select id="persistenceMethod" name="persistenceMethod" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                <option value="scheduled_task">Scheduled Task</option>
+                                <option value="registry_run_key">Registry Run Key (HKCU)</option>
+                            </select>
+                            <div id="error-persistenceMethod" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="commandToPersist" class="text-gray-300">Команда для Персистентності:</label>
+                            <input type="text" id="commandToPersist" name="commandToPersist" placeholder="напр. C:\path\to\payload.exe або calc.exe" value="calc.exe" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-commandToPersist" class="error-message"></div>
+                        </div>
+                        <div>
+                            <label for="artifactName" class="text-gray-300">Ім'я Артефакту (Завдання/Ключа):</label>
+                            <input type="text" id="artifactName" name="artifactName" placeholder="напр. SyntaxUpdater" value="SyntaxUpdater" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <div id="error-artifactName" class="error-message"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-4">
-                     <h3 class="sub-header text-indigo-400">Загальні Налаштування Пейлоада</h3>
+                    <h3 class="sub-header text-indigo-400">Загальні Налаштування Пейлоада</h3>
+                    <div>
+                        <label for="obfuscationKey" class="text-gray-300">Ключ Обфускації (мін. 5 символів):</label>
+                        <input type="text" id="obfuscationKey" name="obfuscationKey" placeholder="Введіть ключ" value="DefaultFrameworkKey" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                        <div id="error-obfuscationKey" class="error-message"></div>
                     </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="outputFormat" class="text-gray-300">Формат Виводу Стейджера:</label>
+                            <select id="outputFormat" name="outputFormat" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="raw_python_stager">Raw Python Стейджер</option>
+                                <option value="base64_encoded_stager">Base64 Кодований Стейджер</option>
+                                <option value="pyinstaller_exe_windows">PyInstaller EXE (Windows)</option>
+                            </select>
+                        </div>
+                        <div id="pyinstallerOptionsContainer" class="hidden">
+                             <label for="pyinstallerOptions" class="text-gray-300">Опції PyInstaller (опціонально):</label>
+                             <input type="text" id="pyinstallerOptions" name="pyinstallerOptions" value="--onefile --noconsole" placeholder="--onefile --noconsole" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                             <div id="error-pyinstallerOptions" class="error-message"></div>
+                        </div>
+                    </div>
+                     <div>
+                        <label class="text-gray-300 mb-2">Опції Генерації Пейлоада:</label>
+                        <div class="space-y-2">
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="enableStagerMetamorphism" name="enableStagerMetamorphism" checked class="form-checkbox">
+                                Увімкнути Метаморфізм Стейджера
+                            </label>
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="enableEvasionChecks" name="enableEvasionChecks" checked class="form-checkbox">
+                                Увімкнути Перевірки Ухилення (загальні)
+                            </label>
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="enableAmsiBypassConcept" name="enableAmsiBypassConcept" checked class="form-checkbox">
+                                Увімкнути Концептуальний Обхід AMSI
+                            </label>
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="enableDiskSizeCheck" name="enableDiskSizeCheck" checked class="form-checkbox">
+                                Увімкнути Перевірку Розміру Диска
+                            </label>
+                        </div>
+                    </div>
+                </div>
                 <div class="pt-2">
                     <button type="submit" id="generatePayloadButton" class="w-full">
                         <span class="button-text">Згенерувати Пейлоад</span>
@@ -185,9 +320,24 @@
         </div>
 
         <div id="reconnaissanceTab" class="tab-content">
-            <h2 class="text-2xl font-semibold mb-4 text-teal-300">Модуль Розвідки</h2>
+             <h2 class="text-2xl font-semibold mb-4 text-teal-300">Модуль Розвідки</h2>
             <form id="reconForm" class="space-y-6">
-                <div class="pt-2">
+                <div>
+                    <label for="reconTarget" class="text-gray-300">Ціль для Розвідки (IP або Домен):</label>
+                    <input type="text" id="reconTarget" name="reconTarget" placeholder="напр. example.com або 192.168.1.1" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400">
+                     <div id="error-reconTarget" class="error-message"></div>
+                </div>
+                <div>
+                    <label for="reconType" class="text-gray-300">Тип Розвідки:</label>
+                    <select id="reconType" name="reconType" class="bg-gray-700 border-gray-600 text-gray-200 placeholder-gray-400 focus:ring-teal-500 focus:border-teal-500">
+                        </select>
+                    <div id="error-reconType" class="error-message"></div>
+                </div>
+                <div id="nmapOptionsContainer" class="hidden"> <label for="nmapOptionsStr" class="text-gray-300">Опції Nmap (опціонально):</label>
+                    <input type="text" id="nmapOptionsStr" name="nmapOptionsStr" placeholder="напр. -Pn -T4 --script default,vuln" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                    <div id="error-nmapOptionsStr" class="error-message"></div>
+                </div>
+                 <div class="pt-2">
                     <button type="submit" id="startReconButton" class="w-full bg-teal-600 hover:bg-teal-700">
                         <span class="button-text">Запустити Розвідку</span>
                         <span class="button-spinner hidden"><div class="spinner inline-block align-middle"></div> Обробка...</span>
@@ -195,21 +345,144 @@
                 </div>
             </form>
              <div id="reconOutputSection" class="mt-8 hidden">
-                </div>
+                <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">Результати Розвідки:</h3>
+                <div id="reconResultsOutput" class="output-area"></div>
+                <div id="reconLog" class="output-area mt-4 text-sm text-gray-400" style="max-height: 150px;"></div>
+                <p class="text-xs text-gray-500 mt-2">
+                    Примітка: Результати Nmap сканувань на CVE тепер можуть включати інформацію про джерело даних (NVD API, Mock DB, Internal DB).
+                </p>
+            </div>
         </div>
 
         <div id="c2ControlTab" class="tab-content">
             <h2 class="text-2xl font-semibold mb-4 text-red-400">C2 Управління (Імітація)</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="md:col-span-1">
+                    <h3 class="sub-header text-gray-300">Активні Імпланти:
+                        <button id="refreshImplantsButton" class="ml-2 text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded-md">
+                            <span class="button-text">Оновити</span>
+                            <span class="button-spinner hidden"><div class="spinner !w-3 !h-3 inline-block align-middle"></div></span>
+                        </button>
+                    </h3>
+                    <div id="implantList" class="space-y-2 max-h-96 overflow-y-auto pr-2">
+                        <p class="text-gray-400">Завантаження імплантів...</p>
+                    </div>
                 </div>
+                <div class="md:col-span-2">
+                    <div id="selectedImplantSection" class="hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <h3 class="sub-header text-red-300">Взаємодія з <span id="selectedImplantId" class="font-mono"></span></h3>
+                        <form id="c2TaskForm" class="space-y-4">
+                            <div>
+                                <label for="c2TaskType" class="text-gray-300">Тип Завдання:</label>
+                                <select id="c2TaskType" name="c2TaskType" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                    <option value="get_system_info">Отримати Інформацію про Систему</option>
+                                    <option value="list_directory">Перелік Директорії</option>
+                                    <option value="exec_command">Виконати Команду</option>
+                                    <option value="exfiltrate_file_chunked">Ексфільтрація Файлу (Частинами)</option>
+                                    <option value="download_file">Download File (з Імпланта)</option>
+                                    <option value="upload_file_b64">Upload File (Base64 на Імплант)</option>
+                                </select>
+                                <div id="error-c2TaskType" class="error-message"></div>
+                            </div>
+                            <div id="c2TaskParamsContainer" class="space-y-3">
+                                <div id="params_list_directory_c2" class="form-section hidden">
+                                     <label for="c2ListdirPath" class="text-gray-300">Шлях до Директорії:</label>
+                                     <input type="text" id="c2ListdirPath" name="c2ListdirPath" placeholder="напр. /tmp або C:\\Users" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                     <div id="error-c2ListdirPath" class="error-message"></div>
+                                </div>
+                                <div id="params_exec_command_c2" class="form-section hidden">
+                                     <label for="c2ExecCommand" class="text-gray-300">Команда для Виконання:</label>
+                                     <input type="text" id="c2ExecCommand" name="c2ExecCommand" placeholder="напр. whoami або ls -la" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                     <div id="error-c2ExecCommand" class="error-message"></div>
+                                </div>
+                                <div id="params_exfiltrate_file_chunked_c2" class="form-section hidden"> <label for="c2ExfilFileChunked" class="text-gray-300">Шлях до Файлу на Імпланті:</label>
+                                     <input type="text" id="c2ExfilFileChunked" name="c2ExfilFileChunked" placeholder="напр. /etc/passwd або C:\\secrets.txt" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                     <div id="error-c2ExfilFileChunked" class="error-message"></div>
+                                </div>
+                                <div id="params_upload_file_b64_c2" class="form-section hidden space-y-3">
+                                    <div>
+                                        <label for="c2UploadFilePath" class="text-gray-300">Шлях для Збереження на Імпланті:</label>
+                                        <input type="text" id="c2UploadFilePath" name="c2UploadFilePath" placeholder="напр. C:\\tmp\\uploaded.txt" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                                        <div id="error-c2UploadFilePath" class="error-message"></div>
+                                    </div>
+                                    <div>
+                                        <label for="c2UploadFileContentB64" class="text-gray-300">Вміст Файлу (Base64):</label>
+                                        <textarea id="c2UploadFileContentB64" name="c2UploadFileContentB64" rows="3" placeholder="Вставте вміст файлу в Base64..." class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400"></textarea>
+                                        <div id="error-c2UploadFileContentB64" class="error-message"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="checkbox-label text-gray-300">
+                                    <input type="checkbox" id="c2QueueTask" name="c2QueueTask" class="form-checkbox" checked>
+                                    Поставити завдання в чергу
+                                </label>
+                            </div>
+                            <div class="pt-2">
+                                <button type="submit" id="sendTaskButton" class="w-full bg-red-600 hover:bg-red-700">
+                                   <span class="button-text">Надіслати Завдання</span>
+                                   <span class="button-spinner hidden"><div class="spinner inline-block align-middle"></div> Обробка...</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                    <div id="c2NoImplantSelected" class="text-center text-gray-400 p-8">
+                        Оберіть імплант зі списку для взаємодії.
+                    </div>
+                </div>
+            </div>
             <div id="c2OutputSection" class="mt-8">
+                <h3 class="text-xl font-semibold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-500">Вивід C2 / Лог Завдань:</h3>
+                <div id="c2ResultsOutput" class="output-area">
+                    Лог взаємодії з C2 буде тут...
                 </div>
+            </div>
         </div>
 
         <div id="loggingAdaptationTab" class="tab-content">
             <h2 class="text-2xl font-semibold mb-4 text-lime-300">Логування та Адаптація (Імітація)</h2>
             <div class="space-y-6">
+                <div>
+                    <h3 class="sub-header text-gray-300">Агреговані Логи Операцій: 
+                        <button id="refreshLogsButtonLA" class="ml-2 text-sm bg-lime-600 hover:bg-lime-700 py-1 px-3 rounded-md">
+                            <span class="button-text">Оновити Логи</span>
+                            <span class="button-spinner hidden"><div class="spinner !w-3 !h-3 inline-block align-middle"></div></span>
+                        </button>
+                    </h3>
+                    <div id="aggregatedLogsOutput" class="output-area h-64">
+                        <p class="text-gray-400">Завантаження логів...</p>
+                    </div>
                 </div>
+                <div>
+                    <h3 class="sub-header text-gray-300">Статистика Ефективності (Імітація):</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                        <div><p class="text-gray-400">Успішних проникнень:</p><p id="statsSuccessRate" class="text-2xl font-bold text-green-400">--%</p></div>
+                        <div><p class="text-gray-400">Частота виявлення (середня):</p><p id="statsDetectionRate" class="text-2xl font-bold text-yellow-400">--%</p></div>
+                        <div><p class="text-gray-400">Найефективніший архетип:</p><p id="statsBestArchetype" class="text-xl font-semibold text-lime-300">N/A</p></div>
+                         <div><p class="text-gray-400">Кількість активних імплантів:</p><p id="statsActiveImplantsLA" class="text-2xl font-bold text-sky-400">0</p></div>
+                         </div>
+                </div>
+                <div>
+                    <h3 class="sub-header text-gray-300">Адаптація Правил Фреймворку (Концепт):</h3>
+                    <form id="frameworkRulesForm" class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 space-y-3">
+                        <div>
+                            <label for="ruleToUpdate" class="text-gray-300">Правило для Оновлення (ID або назва):</label>
+                            <input type="text" id="ruleToUpdate" name="ruleToUpdate" placeholder="напр. EVASION_TECHNIQUE_XOR_PRIORITY" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                        </div>
+                        <div>
+                            <label for="newRuleValue" class="text-gray-300">Нове Значення/Параметр:</label>
+                            <input type="text" id="newRuleValue" name="newRuleValue" placeholder="напр. 0.2 (знизити пріоритет)" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                        </div>
+                        <label class="checkbox-label text-gray-300">
+                            <input type="checkbox" id="autoAdaptRules" name="autoAdaptRules" class="form-checkbox">
+                            Увімкнути автоматичну адаптацію на основі цих даних
+                        </label>
+                        <button type="button" id="applyRuleChangesButton" class="bg-lime-600 hover:bg-lime-700"> <span class="button-text">Застосувати Зміни Правил</span>
+                            <span class="button-spinner hidden"><div class="spinner inline-block align-middle"></div></span>
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 
