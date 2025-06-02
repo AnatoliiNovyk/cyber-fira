@@ -36,7 +36,7 @@ def initialize_simulated_implants_c2_logic():
         ip_prefix = random.choice(base_ip_prefixes)
         ip_address = f"{ip_prefix}{random.randint(10,250)}.{random.randint(10,250)}"
         os_type = random.choice(os_types)
-        last_seen_timestamp = time.time() - random.randint(600, 12000)
+        last_seen_timestamp = time.time() - random.randint(1, 60)
         last_seen_str = datetime.fromtimestamp(last_seen_timestamp).strftime('%Y-%m-%d %H:%M:%S')
         
         simulated_implants_c2.append({

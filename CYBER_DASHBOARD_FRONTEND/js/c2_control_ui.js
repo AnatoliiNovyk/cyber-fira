@@ -45,7 +45,7 @@ function initializeC2ControlEvents() {
         return;
     }
 
-    refreshImplantsButton.addEventListener('click', fetchAndRenderImplants);
+    refreshImplantsButton.addEventListener('click', () => fetchAndRenderImplants(true));
     c2TaskForm.addEventListener('submit', handleC2TaskFormSubmit);
     c2TaskTypeSelect.addEventListener('change', updateC2TaskParamsVisibility);
 
@@ -61,14 +61,12 @@ function initializeC2ControlEvents() {
 /**
  * Завантажує та відображає список імплантів з backend.
  */
-async function fetchAndRenderImplants() {
-    if (implantsLoadedC2UI) {
-        console.log("[C2_UI] Список імплантів вже завантажено.");
-        // Можливо, варто просто перерендерити поточні дані, якщо вони могли змінитися без перезавантаження
-        // renderImplantsList(activeImplantsDataC2UI); // Потенційна функція для перерендерингу
+async function fetchAndRenderImplants(forceRefresh = false) {
+    if (!forceRefresh && implantsLoadedC2UI) {
+        console.log("[C2_UI] Список імплантів вже завантажено (не примусово), оновлення не виконується.");
         return;
     }
-    if (!implantListDiv || !refreshImplantsButton) return;
+    if (!implantListDiv) return; // refreshImplantsButton check is not strictly needed here for the function's core logic
 
     setButtonLoadingState(refreshImplantsButton, true, 'Оновити');
     logToC2UIOutput("[GUI_C2] Запит списку імплантів з backend...");

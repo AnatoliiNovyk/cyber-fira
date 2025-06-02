@@ -2,7 +2,8 @@
 # Логіка для модуля оперативних даних та адаптації фреймворку
 
 import random
-from datetime import datetime
+import json # Додано імпорт json
+from datetime import datetime, timedelta # Додано імпорт timedelta
 import time # Для генерації міток часу в логах
 
 # Імпорти з кореневих файлів проекту
@@ -52,11 +53,19 @@ def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
         target_ip = f"{random.randint(10,192)}.{random.randint(0,168)}.{random.randint(1,200)}.{random.randint(1,254)}"
         port_choice = random.choice([21, 22, 80, 443, 3306, 3389, 8080])
         cve_id_choice = f"CVE-202{random.randint(3,5)}-{random.randint(1000,39999)}"
-        payload_type_choice = random.choice(config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"]) if config.CONCEPTUAL_PARAMS_SCHEMA_BE else "unknown_payload"
+        
+        # Безпечне отримання payload_type_choice
+        payload_archetype_config = config.CONCEPTUAL_PARAMS_SCHEMA_BE.get("payload_archetype", {})
+        allowed_payload_values = payload_archetype_config.get("allowed_values", [])
+        if allowed_payload_values:
+            payload_type_choice = random.choice(allowed_payload_values)
+        else:
+            payload_type_choice = "unknown_payload_type_cfg_err"
+            log_messages.append(f"[OPS_LOGIC_WARN] 'payload_archetype.allowed_values' is missing or empty in config. Using default: {payload_type_choice}")
         implant_id_choice = f"IMPLNT-{random.randint(100,999)}-{random.choice('ABCDEF')}"
         
         log_entry = {
-            "timestamp": (datetime.now() - datetime.timedelta(seconds=random.randint(0, 7200))).strftime('%Y-%m-%d %H:%M:%S'), # Логи за останні 2 години
+            "timestamp": (datetime.now() - timedelta(seconds=random.randint(0, 7200))).strftime('%Y-%m-%d %H:%M:%S'), # Логи за останні 2 години
             "level": random.choice(log_levels), 
             "component": random.choice(components),
             "message": random.choice(messages_templates).format(
@@ -120,10 +129,17 @@ def get_simulated_stats_logic(log_messages: list) -> dict:
     total_operations = random.randint(1000, 5000)
     
     # Визначення найкращого архетипу
-    if random.random() < 0.7:
-        best_archetype = "demo_c2_beacon_payload"
+    payload_archetype_config_stats = config.CONCEPTUAL_PARAMS_SCHEMA_BE.get("payload_archetype", {})
+    allowed_payload_values_stats = payload_archetype_config_stats.get("allowed_values", [])
+
+    if allowed_payload_values_stats:
+        if random.random() < 0.7 and "demo_c2_beacon_payload" in allowed_payload_values_stats:
+            best_archetype = "demo_c2_beacon_payload"
+        else:
+            best_archetype = random.choice(allowed_payload_values_stats)
     else:
-        best_archetype = random.choice(config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"])
+        best_archetype = "unknown_archetype_cfg_err"
+        log_messages.append(f"[OPS_LOGIC_STATS_WARN] 'payload_archetype.allowed_values' is missing or empty in config for stats. Using default: {best_archetype}")
     
     # Кількість активних імплантів
     active_implants_count = len(current_implants) # Рахуємо з отриманого списку
@@ -164,8 +180,10 @@ def get_operational_data_logic(log_messages_main: list) -> tuple[dict, int]:
         }, 200
     except Exception as e:
         log_messages.append(f"[OPS_LOGIC_GET_DATA_FATAL_ERROR] {str(e)}")
-        # import traceback
-        # log_messages.append(traceback.format_exc())
+        import traceback # Розкоментовано імпорт traceback
+        full_traceback = traceback.format_exc() # Отримуємо повне трасування
+        log_messages.append(f"[OPS_LOGIC_GET_DATA_TRACEBACK]\n{full_traceback}") # Додаємо трасування до логів
+        print(full_traceback) # Додаємо вивід трасування в термінал
         return {"success": False, "error": "Server error retrieving operational data", "log": "\n".join(log_messages)}, 500
 
 
