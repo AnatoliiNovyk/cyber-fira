@@ -6,6 +6,9 @@ let reconForm, reconTargetInput, reconTypeSelect,
     nmapOptionsContainer, nmapOptionsInput, startReconButton,
     reconOutputSection, reconResultsOutput, reconLogOutput; // Змінено reconLog на reconLogOutput для уникнення конфлікту імен
 
+// --- Стан ---
+let reconTypesLoaded = false; // Прапорець для відстеження завантаження типів розвідки
+
 /**
  * Ініціалізує елементи DOM та обробники подій для вкладки "Розвідка".
  */
@@ -143,6 +146,10 @@ async function handleReconFormSubmit(event) {
  * Завантажує список типів розвідки з backend та заповнює select.
  */
 async function fetchReconTypes() {
+    if (reconTypesLoaded) {
+        console.log("[ReconUI] Типи розвідки вже завантажені.");
+        return;
+    }
     if (!reconTypeSelect) return;
 
     console.log("[ReconUI] Завантаження типів розвідки...");
@@ -159,6 +166,7 @@ async function fetchReconTypes() {
                 reconTypeSelect.appendChild(option);
             });
             console.log("[ReconUI] Типи розвідки успішно завантажені.");
+            reconTypesLoaded = true; // Встановлюємо прапорець після успішного завантаження
             // Після завантаження, ініціалізуємо видимість опцій Nmap
             if (reconTypeSelect.value) {
                 reconTypeSelect.dispatchEvent(new Event('change'));

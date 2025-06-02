@@ -10,6 +10,7 @@ let c2ControlTab, implantListDiv, selectedImplantSection,
 // --- Стан ---
 let activeImplantsDataC2UI = [];
 let currentSelectedImplantC2UI = null;
+let implantsLoadedC2UI = false; // Прапорець для відстеження завантаження даних
 
 // --- Конфігурація секцій параметрів для завдань C2 ---
 const c2TaskParamSectionsConfigFE = {
@@ -61,6 +62,12 @@ function initializeC2ControlEvents() {
  * Завантажує та відображає список імплантів з backend.
  */
 async function fetchAndRenderImplants() {
+    if (implantsLoadedC2UI) {
+        console.log("[C2_UI] Список імплантів вже завантажено.");
+        // Можливо, варто просто перерендерити поточні дані, якщо вони могли змінитися без перезавантаження
+        // renderImplantsList(activeImplantsDataC2UI); // Потенційна функція для перерендерингу
+        return;
+    }
     if (!implantListDiv || !refreshImplantsButton) return;
 
     setButtonLoadingState(refreshImplantsButton, true, 'Оновити');
@@ -99,6 +106,7 @@ async function fetchAndRenderImplants() {
             if (typeof updateActiveImplantsStats === 'function') { // Ця функція буде в logging_adaptation_ui.js
                 updateActiveImplantsStats(activeImplantsDataC2UI.length);
             }
+            implantsLoadedC2UI = true; // Встановлюємо прапорець після успішного завантаження
 
         } else {
             logToC2UIOutput(`[GUI_C2_ERROR] Помилка отримання списку імплантів: ${data.error || 'Невідома помилка backend'}`, true);

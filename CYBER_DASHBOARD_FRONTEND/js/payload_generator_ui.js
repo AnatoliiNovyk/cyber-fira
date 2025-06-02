@@ -7,6 +7,9 @@ let payloadForm, payloadArchetypeSelect, archetypeParamsContainer,
     generatePayloadButton, outputFormatSelect, pyinstallerOptionsContainer,
     enableStagerDebugPrintsCheckbox;
 
+// --- Стан ---
+let payloadArchetypesLoaded = false; // Прапорець для відстеження завантаження архетипів
+
 // --- Конфігурація секцій параметрів (можна розширити або завантажувати) ---
 const payloadParamSectionsConfigFE = {
     "demo_echo_payload": { sectionId: 'params_demo_echo_payload', fields: ['messageToEcho'] },
@@ -358,6 +361,10 @@ async function handlePayloadFormSubmit(event) {
  * Завантажує список архетипів з backend та заповнює select.
  */
 async function fetchPayloadArchetypes() {
+    if (payloadArchetypesLoaded) {
+        console.log("[PayloadUI] Архетипи вже завантажені.");
+        return;
+    }
     if (!payloadArchetypeSelect) return;
 
     console.log("[PayloadUI] Завантаження архетипів...");
@@ -375,6 +382,7 @@ async function fetchPayloadArchetypes() {
                 payloadArchetypeSelect.appendChild(option);
             });
             console.log("[PayloadUI] Архетипи успішно завантажені.");
+            payloadArchetypesLoaded = true; // Встановлюємо прапорець після успішного завантаження
             // Після завантаження архетипів, ініціалізуємо видимість секцій
             if (payloadArchetypeSelect.value) {
                  payloadArchetypeSelect.dispatchEvent(new Event('change'));

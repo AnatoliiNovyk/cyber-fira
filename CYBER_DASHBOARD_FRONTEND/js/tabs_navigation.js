@@ -32,19 +32,32 @@ function initializeTabs() {
                 activeTabContent.classList.add('active');
                 console.log(`Активовано вкладку: ${activeTabContentId}`);
 
-                // Специфічні дії при активації певних вкладок
-                // (наприклад, завантаження даних для C2 або логів)
-                // Ці виклики будуть додані або модифіковані в main.js або відповідних UI модулях,
-                // щоб уникнути прямої залежності tabs_navigation.js від конкретних функцій завантаження даних.
-                // Наприклад, можна викликати кастомну подію, на яку підпишуться інші модулі.
-                
-                // Приклад: Якщо активували вкладку C2, викликаємо оновлення імплантів
-                // (Ця логіка краще буде в main.js або c2_control_ui.js, слухаючи зміну вкладки)
-                // if (activeTabContentId === 'c2ControlTab' && typeof fetchAndRenderImplants === 'function') {
-                //     fetchAndRenderImplants(); 
-                // } else if (activeTabContentId === 'loggingAdaptationTab' && typeof fetchOperationalData === 'function') {
-                //     fetchOperationalData();
-                // }
+                // Завантаження даних для нової активної вкладки, якщо ще не завантажено (перевірка всередині функцій)
+                switch (activeTabContentId) {
+                    case 'payloadGeneratorTab':
+                        if (typeof fetchPayloadArchetypes === 'function') {
+                            fetchPayloadArchetypes();
+                        }
+                        break;
+                    case 'reconnaissanceTab':
+                        if (typeof fetchReconTypes === 'function') {
+                            fetchReconTypes();
+                        }
+                        break;
+                    case 'c2ControlTab':
+                        if (typeof fetchAndRenderImplants === 'function') {
+                            fetchAndRenderImplants();
+                        }
+                        break;
+                    case 'loggingAdaptationTab':
+                        if (typeof fetchOperationalData === 'function') {
+                            fetchOperationalData();
+                        }
+                        break;
+                    default:
+                        // console.log(`Немає специфічної функції завантаження для вкладки ${activeTabContentId}`);
+                        break;
+                }
 
             } else {
                 console.error(`Вміст для вкладки з ID '${activeTabContentId}' не знайдено.`);

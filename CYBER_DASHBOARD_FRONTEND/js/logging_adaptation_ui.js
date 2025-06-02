@@ -6,6 +6,9 @@ let loggingAdaptationTab, aggregatedLogsOutput, refreshLogsButtonLA,
     statsSuccessRate, statsDetectionRate, statsBestArchetype, statsActiveImplantsLA,
     autoAdaptRulesCheckbox, applyRuleChangesButton, ruleToUpdateInput, newRuleValueInput;
 
+// --- Стан ---
+let operationalDataLoaded = false; // Прапорець для відстеження завантаження даних
+
 /**
  * Ініціалізує елементи DOM та обробники подій для вкладки "Логи & Адаптація".
  */
@@ -42,6 +45,11 @@ function initializeLoggingAdaptationEvents() {
  * Завантажує оперативні дані (логи та статистику) з backend.
  */
 async function fetchOperationalData() {
+    if (operationalDataLoaded) {
+        console.log("[LoggingUI] Оперативні дані вже завантажені.");
+        // Якщо дані мають часто оновлюватися, цей прапорець може бути недоречним,
+        // або потрібна логіка для примусового оновлення. Для початкового завантаження - ОК.
+    } // Для цього конкретного випадку, оновлення логів завжди бажане, тому прапорець може бути зайвим або мати іншу логіку.
     if (!aggregatedLogsOutput || !statsSuccessRate || !refreshLogsButtonLA) return;
 
     setButtonLoadingState(refreshLogsButtonLA, true, 'Оновити Логи');
@@ -95,6 +103,7 @@ async function fetchOperationalData() {
                  setDefaultStats();
             }
             logToLoggingAdaptationUI("[GUI_LOG_ADAPT] Оперативні дані успішно оновлено.");
+            operationalDataLoaded = true; // Встановлюємо прапорець після успішного завантаження
         } else {
             logToLoggingAdaptationUI(`[GUI_LOG_ADAPT_ERROR] Помилка отримання оперативних даних: ${data.error || 'Невідома помилка backend'}`, true);
             setDefaultStats();
