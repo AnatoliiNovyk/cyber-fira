@@ -89,17 +89,19 @@ def simulate_osint_subdomain_search_logic(target_domain: str, log_messages: list
 
 # --- Логіка для Nmap та CVE (перенесено та адаптовано з app.py v1.9.8) ---
 def parse_nmap_xml_output_logic(nmap_xml_output: str, log_messages: list) -> tuple[list[dict], list[dict]]:
-    """Парсить XML-вивід nmap для отримання інформації про сервіси та ОС."""
-    # ... (Повний код функції parse_nmap_xml_output_for_services з app.py v1.9.8) ...
+    """Парсить XML-вивід nmap для отримання інформації про хости, сервіси, ОС та результати скриптів."""
+    # Ця функція розбирає XML, згенерований nmap з опцією -oX,
+    # та витягує структуровані дані про відкриті порти, сервіси, версії,
+    # визначення ОС та результати виконання NSE-скриптів.
     # Замість log_messages.append використовуйте переданий список log_messages
     # Наприклад: log_messages.append("[NMAP_XML_PARSE_LOGIC_INFO] Початок парсингу XML-виводу nmap.")
     parsed_services = []
-    parsed_os_info = []
+    parsed_os = []
     try:
         log_messages.append("[NMAP_XML_PARSE_LOGIC_INFO] Початок парсингу XML-виводу nmap.")
         if not nmap_xml_output.strip():
             log_messages.append("[NMAP_XML_PARSE_LOGIC_WARN] XML-вивід порожній.")
-            return parsed_services, parsed_os_info
+            return parsed_services, parsed_os
         root = ET.fromstring(nmap_xml_output)
         for host_node in root.findall('host'):
             address_node = host_node.find('address')
@@ -115,7 +117,7 @@ def parse_nmap_xml_output_logic(nmap_xml_output: str, log_messages: list) -> tup
                     os_gen = os_class_node.get('osgen', '') if os_class_node is not None else ''
                     cpe_nodes = os_class_node.findall('cpe') if os_class_node is not None else []
                     os_cpes = [cpe.text for cpe in cpe_nodes if cpe.text]
-                    parsed_os_info.append({
+                    parsed_os.append({
                         "host_ip": host_ip, "name": os_name, "accuracy": accuracy,
                         "family": os_family, "generation": os_gen, "cpes": os_cpes
                     })
@@ -175,29 +177,33 @@ def parse_nmap_xml_output_logic(nmap_xml_output: str, log_messages: list) -> tup
                     host_scripts_output.append({"id": script_id, "output": script_data, "structured_data": structured_script_data, "tables": tables_data})
                     log_messages.append(f"[NMAP_XML_PARSE_LOGIC_HOSTSCRIPT] Знайдено хост-скрипт '{script_id}' для {host_ip}.")
 
-                os_info_entry = next((os_info for os_info in parsed_os_info if os_info["host_ip"] == host_ip), None)
+                os_info_entry = next((os_info for os_info in parsed_os if os_info["host_ip"] == host_ip), None)
                 if os_info_entry:
                     os_info_entry.setdefault("host_scripts", []).extend(host_scripts_output)
                 elif host_scripts_output: 
-                    parsed_os_info.append({"host_ip": host_ip, "name": "N/A (Host Scripts Only)", "accuracy": "N/A", "family": "", "generation": "", "cpes": [], "host_scripts": host_scripts_output})
-        log_messages.append(f"[NMAP_XML_PARSE_LOGIC_SUCCESS] Успішно розпарсено XML, знайдено {len(parsed_services)} сервісів та {len(parsed_os_info)} записів ОС/хост-скриптів.")
+                    parsed_os.append({"host_ip": host_ip, "name": "N/A (Host Scripts Only)", "accuracy": "N/A", "family": "", "generation": "", "cpes": [], "host_scripts": host_scripts_output})
+        log_messages.append(f"[NMAP_XML_PARSE_LOGIC_SUCCESS] Успішно розпарсено XML, знайдено {len(parsed_services)} сервісів та {len(parsed_os)} записів ОС/хост-скриптів.")
     except ET.ParseError as e_parse:
         log_messages.append(f"[NMAP_XML_PARSE_LOGIC_ERROR] Помилка парсингу XML: {e_parse}")
     except Exception as e_generic:
         log_messages.append(f"[NMAP_XML_PARSE_LOGIC_FATAL] Непередбачена помилка під час парсингу XML: {e_generic}")
-    return parsed_services, parsed_os_info
+    return parsed_services, parsed_os
 
 
 def fetch_cves_from_nvd_api_logic(service_key_raw: str, service_cpes: list, log_messages: list) -> list[dict]:
     """Отримує дані CVE з NVD API 2.0."""
-    # ... (Повний код функції fetch_cves_from_nvd_api з app.py v1.9.8) ...
+    # Ця функція формує запити до NVD API на основі CPE або ключових слів сервісу,
+    # отримує інформацію про вразливості (CVE), включаючи опис, рейтинг CVSS,
+    # дати публікації/модифікації та посилання.
     # Використовуйте config.NVD_API_BASE_URL, config.NVD_API_KEY (якщо є), config.NVD_REQUEST_TIMEOUT_SECONDS, config.NVD_RESULTS_PER_PAGE
     nvd_cves_found = []
     headers = {}
     nvd_api_key_val = config.NVD_API_KEY # Якщо NVD_API_KEY визначено в config.py
-    # Або, якщо NVD_API_KEY завантажується з os.environ в app_core.py, його треба передати сюди
-    # nvd_api_key_val = os.environ.get("NVD_API_KEY") # Приклад, якщо ключ не в config.py
-    if nvd_api_key_val: headers['apiKey'] = nvd_api_key_val
+    if nvd_api_key_val:
+        headers['apiKey'] = nvd_api_key_val
+        log_messages.append("[NVD_API_LOGIC_INFO] Використовується NVD API ключ.")
+    else:
+        log_messages.append("[NVD_API_LOGIC_WARN] NVD API ключ не надано. Можливі обмеження частоти запитів.")
 
     search_terms = []
     if service_cpes:
@@ -265,7 +271,9 @@ def fetch_cves_from_nvd_api_logic(service_key_raw: str, service_cpes: list, log_
 
 def conceptual_cve_lookup_logic(services_info: list, log_messages: list) -> list[dict]:
     """Виконує пошук CVE, використовуючи NVD API та резервні бази."""
-    # ... (Повний код функції conceptual_cve_lookup_be з app.py v1.9.8, але викликає fetch_cves_from_nvd_api_logic) ...
+    # Ця функція агрегує пошук CVE з різних джерел:
+    # 1. Спочатку запитує NVD API (через fetch_cves_from_nvd_api_logic).
+    # 2. Потім перевіряє внутрішні мок-бази (MOCK_EXTERNAL_CVE_API_DB, CONCEPTUAL_CVE_DATABASE_BE) для повноти.
     found_cves_overall = []
     processed_cve_ids = set()
     log_messages.append(f"[CVE_LOOKUP_LOGIC_INFO] Пошук CVE для {len(services_info)} сервісів.")
@@ -310,8 +318,9 @@ def conceptual_cve_lookup_logic(services_info: list, log_messages: list) -> list
 
 
 def perform_nmap_scan_logic(target: str, options: list = None, use_xml_output: bool = False, recon_type_hint: str = None, log_messages: list = None) -> tuple[str, list[dict], list[dict]]:
-    """Виконує сканування Nmap."""
-    # ... (Повний код функції perform_nmap_scan_be з app.py v1.9.8) ...
+    """Виконує сканування Nmap з заданими опціями."""
+    # Ця функція будує та виконує команду nmap, обробляє її вивід.
+    # Вона намагається валідувати та фільтрувати опції для безпеки та коректності.
     # Використовуйте переданий log_messages, викликайте parse_nmap_xml_output_logic
     if log_messages is None: log_messages = [] # Ініціалізація, якщо не передано
     log_messages.append(f"[RECON_NMAP_LOGIC_INFO] Запуск nmap для: {target}, опції: {options}, XML: {use_xml_output}, Тип: {recon_type_hint}")

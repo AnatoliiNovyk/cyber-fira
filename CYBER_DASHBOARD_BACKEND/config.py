@@ -4,7 +4,7 @@
 import os
 
 # Версія Backend
-VERSION_BACKEND = "1.9.8" # Або нова версія після рефакторингу, наприклад, "2.0.0-refactored"
+VERSION_BACKEND = "1.9.9" # Або нова версія після рефакторингу, наприклад, "2.0.0-refactored"
 
 # Конфігурація NVD API
 NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -150,7 +150,8 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True},
     "enable_amsi_bypass_concept": {"type": bool, "required": False, "default": True},
-    "enable_disk_size_check": {"type": bool, "required": False, "default": True}
+    "enable_disk_size_check": {"type": bool, "required": False, "default": True},
+    "enable_stager_debug_prints": {"type": bool, "required": False, "default": False}
 }
 
 # Шаблони архетипів пейлоадів

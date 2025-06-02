@@ -234,3 +234,13 @@ def handle_c2_task_logic(task_data: dict, log_messages: list) -> tuple[dict, int
         "queued_task": task_to_queue,
         "log": "\n".join(log_messages)
     }, 200
+
+def get_simulated_implants() -> list:
+    """Повертає поточний список симульованих імплантів."""
+    global simulated_implants_c2
+    return simulated_implants_c2
+
+def get_exfiltrated_file_chunks() -> dict:
+    """Повертає поточну базу даних частин файлів, що ексфільтруються."""
+    global exfiltrated_file_chunks_db_c2
+    return exfiltrated_file_chunks_db_c2

@@ -4,7 +4,8 @@
 // --- DOM Елементи ---
 let payloadForm, payloadArchetypeSelect, archetypeParamsContainer,
     payloadOutputSection, payloadStagerOutput, payloadGenerationLog,
-    generatePayloadButton, outputFormatSelect, pyinstallerOptionsContainer;
+    generatePayloadButton, outputFormatSelect, pyinstallerOptionsContainer,
+    enableStagerDebugPrintsCheckbox;
 
 // --- Конфігурація секцій параметрів (можна розширити або завантажувати) ---
 const payloadParamSectionsConfigFE = {
@@ -107,6 +108,7 @@ function initializePayloadGeneratorEvents() {
     generatePayloadButton = document.getElementById('generatePayloadButton');
     outputFormatSelect = document.getElementById('outputFormat');
     pyinstallerOptionsContainer = document.getElementById('pyinstallerOptionsContainer');
+    enableStagerDebugPrintsCheckbox = document.getElementById('enableStagerDebugPrints');
 
     if (!payloadForm || !payloadArchetypeSelect || !generatePayloadButton) {
         console.error("Ключові елементи форми генератора пейлоадів не знайдено!");
@@ -295,7 +297,8 @@ async function handlePayloadFormSubmit(event) {
         // Додаємо параметр, якщо він релевантний для поточного архетипу або є загальним
         const isArchetypeSpecificField = payloadParamSectionsConfigFE[currentArchetype]?.fields.includes(key);
         const isGeneralField = ['obfuscation_key', 'output_format', 'pyinstaller_options', 
-                                'enable_stager_metamorphism', 'enable_evasion_checks', 
+                                'enable_stager_metamorphism', 'enable_evasion_checks',
+                                'enable_stager_debug_prints',
                                 'enable_amsi_bypass_concept', 'enable_disk_size_check'].includes(key);
 
         if (isArchetypeSpecificField || isGeneralField) {
@@ -307,7 +310,8 @@ async function handlePayloadFormSubmit(event) {
         }
     }
     // Переконуємося, що всі булеві параметри передані коректно
-    ['enable_stager_metamorphism', 'enable_evasion_checks', 'enable_amsi_bypass_concept', 'enable_disk_size_check'].forEach(cbName => {
+    ['enable_stager_metamorphism', 'enable_evasion_checks', 'enable_amsi_bypass_concept', 
+     'enable_disk_size_check', 'enable_stager_debug_prints'].forEach(cbName => {
         const cbElement = document.getElementById(cbName);
         if (cbElement) params[cbName] = cbElement.checked;
     });

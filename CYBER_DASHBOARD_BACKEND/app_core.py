@@ -61,9 +61,9 @@ if __name__ == '__main__':
     print("  POST /api/c2/task (Модуль C2 Control)")
     print("  GET  /api/data/operational (Модуль Operational Data)")
     print("  POST /api/data/framework_rules (Модуль Operational Data)")
-    print("Переконайтеся, що 'nmap' встановлено та доступно в PATH для використання Nmap-сканувань.")
-    print("Для генерації .EXE пейлоадів, PyInstaller має бути встановлений та доступний в PATH.")
-    print("Також, для використання NVD API, може знадобитися ключ API, встановлений як змінна середовища NVD_API_KEY.")
+    print("\nПереконайтеся, що 'nmap' встановлено та доступно в системному PATH для використання Nmap-сканувань.")
+    print("Для генерації .EXE пейлоадів, 'PyInstaller' має бути встановлений та доступний в системному PATH.")
+    print("Для повноцінного використання NVD API (пошук CVE), рекомендується встановити змінну середовища NVD_API_KEY. Без ключа можливі обмеження частоти запитів.")
     print("Натисніть Ctrl+C для зупинки.")
     print("="*60)
     

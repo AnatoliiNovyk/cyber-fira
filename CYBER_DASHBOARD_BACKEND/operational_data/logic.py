@@ -13,12 +13,12 @@ import config # Доступ до VERSION_BACKEND та CONCEPTUAL_PARAMS_SCHEMA_
 # Наразі, для простоти, припустимо, що ми можемо імпортувати його,
 # але це може потребувати перегляду архітектури стану.
 try:
-    from c2_control.logic import exfiltrated_file_chunks_db_c2, simulated_implants_c2
+    from c2_control.logic import get_exfiltrated_file_chunks, get_simulated_implants
 except ImportError:
     # Заглушка, якщо c2_control.logic ще не повністю доступний або для уникнення циклічних залежностей
-    print("[OPS_LOGIC_WARN] Не вдалося імпортувати exfiltrated_file_chunks_db_c2 або simulated_implants_c2 з c2_control.logic. Статистика файлів та імплантів може бути неповною.")
-    exfiltrated_file_chunks_db_c2 = {}
-    simulated_implants_c2 = []
+    print("[OPS_LOGIC_WARN] Не вдалося імпортувати get_exfiltrated_file_chunks або get_simulated_implants з c2_control.logic. Статистика файлів та імплантів може бути неповною.")
+    def get_exfiltrated_file_chunks(): return {}
+    def get_simulated_implants(): return []
 
 
 def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
@@ -94,15 +94,15 @@ def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
         logs.append(log_entry)
     
     # Додамо лог про активні процеси ексфільтрації, якщо є
-    if exfiltrated_file_chunks_db_c2: # Використовуємо імпортовану змінну
-        for file_key, file_info in list(exfiltrated_file_chunks_db_c2.items()): 
+    current_exfil_db = get_exfiltrated_file_chunks()
+    if current_exfil_db:
+        for file_key, file_info in list(current_exfil_db.items()): 
             num_received = len(file_info.get("received_chunks", {}))
             total_chunks_val = file_info.get("total_chunks", "N/A")
             logs.append({
-                "timestamp": file_info.get("first_seen", datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
-                "level": "INFO",
-                "component": "C2ExfilMonitorLogic", # Змінено для відображення, що це з логіки
-                "message": f"Exfiltrating '{file_info.get('file_path')}' from {file_info.get('implant_id')}. Received {num_received}/{total_chunks_val} chunks. Task ID: {file_info.get('task_id')}."
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "type": "file_exfil_progress",
+                "message": f"Ексфільтрація файлу {file_key}: {num_received}/{total_chunks_val} чанків отримано"
             })
     
     logs.sort(key=lambda x: x["timestamp"], reverse=True) # Сортуємо за часом, новіші зверху
@@ -112,20 +112,21 @@ def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
 
 def get_simulated_stats_logic(log_messages: list) -> dict:
     """Генерує симульовану статистику ефективності."""
-    global simulated_implants_c2 # Використовуємо імпортовану змінну
+    current_implants = get_simulated_implants()
     
     # Базова статистика
     success_rate = random.randint(65, 97) # Трохи оптимістичніше
-    detection_rate = random.randint(3, 22) # Трохи реалістичніше
+    avg_response_time = random.uniform(0.8, 2.5)
+    total_operations = random.randint(1000, 5000)
     
-    # Вибір найкращого архетипу
-    best_archetype = "N/A"
-    if config.CONCEPTUAL_PARAMS_SCHEMA_BE and "payload_archetype" in config.CONCEPTUAL_PARAMS_SCHEMA_BE and \
-       config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"].get("allowed_values"):
+    # Визначення найкращого архетипу
+    if random.random() < 0.7:
+        best_archetype = "demo_c2_beacon_payload"
+    else:
         best_archetype = random.choice(config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"])
     
     # Кількість активних імплантів
-    active_implants_count = len(simulated_implants_c2) # Рахуємо з імпортованого списку
+    active_implants_count = len(current_implants) # Рахуємо з отриманого списку
 
     # Додаткова "просунута" статистика (симуляція)
     avg_dwell_time_hours = round(random.uniform(24, 168), 1) # Середній час перебування в годинах
@@ -134,7 +135,7 @@ def get_simulated_stats_logic(log_messages: list) -> dict:
 
     stats = {
         "successRate": success_rate, 
-        "detectionRate": detection_rate,
+        "detectionRate": avg_response_time,
         "bestArchetype": best_archetype,
         "activeImplants": active_implants_count,
         "avgDwellTimeHours": avg_dwell_time_hours,
