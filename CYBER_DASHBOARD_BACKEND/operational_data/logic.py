@@ -56,7 +56,7 @@ def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
         implant_id_choice = f"IMPLNT-{random.randint(100,999)}-{random.choice('ABCDEF')}"
         
         log_entry = {
-            "timestamp": (datetime.now() - وقت.timedelta(seconds=random.randint(0, 7200))).strftime('%Y-%m-%d %H:%M:%S'), # Логи за останні 2 години
+            "timestamp": (datetime.now() - datetime.timedelta(seconds=random.randint(0, 7200))).strftime('%Y-%m-%d %H:%M:%S'), # Логи за останні 2 години
             "level": random.choice(log_levels), 
             "component": random.choice(components),
             "message": random.choice(messages_templates).format(

