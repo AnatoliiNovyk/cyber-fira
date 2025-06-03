@@ -1,45 +1,29 @@
-# CYBER_DASHBOARD_BACKEND/config.py
+# File: CYBER_DASHBOARD_BACKEND/config.py
 # Координатор: Синтаксис
-# Опис: Конфігураційні змінні, константи, схеми та бази даних для CYBER DASHBOARD
-# Оновлено ключ для OpenSSH у MOCK_EXTERNAL_CVE_API_DB для кращого зіставлення.
+# Опис: Додано нові параметри для управління логуванням та метаданими стейджера.
 
 import os
 
-# Версія Backend
-VERSION_BACKEND = "1.9.9" # Або актуальна версія вашого проекту
+VERSION_BACKEND = "1.9.9" 
 
-# Конфігурація NVD API
 NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 NVD_API_KEY = os.environ.get("NVD_API_KEY") 
 NVD_REQUEST_TIMEOUT_SECONDS = 15
 NVD_RESULTS_PER_PAGE = 20
 
-# Внутрішня (можливо, застаріла або резервна) база CVE
 CONCEPTUAL_CVE_DATABASE_BE = {
-    # Приклад: Ключ має бути точним "продукт версія"
     "apache httpd 2.4.6": [{"cve_id": "CVE-2017-7679", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.6 to 2.4.27 mod_mime buffer overflow (Internal DB).", "source": "Internal Fallback DB"}],
     "openssh 7.4": [{"cve_id": "CVE-2020-15778", "severity": "MEDIUM", "summary": "OpenSSH 7.4 command injection vulnerability (Internal DB).", "source": "Internal Fallback DB"}],
-    # Додайте інші за потреби
 }
 
-# Імітація зовнішньої бази даних CVE
 MOCK_EXTERNAL_CVE_API_DB = {
-    # Ключ для Apache httpd залишаємо з версією, оскільки логіка зіставлення для нього спрацювала
-    "apache httpd 2.4.53": [ # Цей ключ використовувався для зіставлення з "apache httpd 2.4.6"
+    "apache httpd 2.4.53": [ 
         {"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "X-Frame-Options header issue in Apache HTTP Server <=2.4.53 (Mock DB).", "source": "Mock External API"},
         {"cve_id": "CVE-2021-44224", "severity": "MEDIUM", "summary": "Possible NULL pointer dereference in Apache HTTP Server 2.4.52 and earlier (Mock DB).", "source": "Mock External API"}
     ],
-    # Змінюємо ключ для OpenSSH на більш загальний, щоб він зіставлявся з різними версіями,
-    # або додаємо конкретний для "openssh 7.4", якщо CVE специфічні.
-    # Варіант 1: Загальний ключ (рекомендовано для гнучкості mock-бази)
-    "openssh": [ # Раніше було "openssh 8.2p1"
+    "openssh": [ 
         {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH (covers various versions including 6.2-8.8) (Mock DB).", "source": "Mock External API"}
-        # Можна додати сюди інші CVE для OpenSSH, якщо потрібно
     ],
-    # Варіант 2 (якщо потрібна точність і CVE-2021-41617 дійсно стосується 7.4):
-    # "openssh 7.4": [
-    #     {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH 7.4 (Mock DB).", "source": "Mock External API"}
-    # ],
     "vsftpd 3.0.3": [
         {"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "Denial of service in vsftpd <=3.0.3 (Mock DB).", "source": "Mock External API"}
     ],
@@ -56,10 +40,8 @@ MOCK_EXTERNAL_CVE_API_DB = {
     "microsoft iis 10.0": [
         {"cve_id": "CVE-2021-31166", "severity": "CRITICAL", "summary": "HTTP Protocol Stack Remote Code Execution Vulnerability in Microsoft IIS (Mock DB).", "source": "Mock External API"}
     ]
-    # Додайте інші за потреби
 }
 
-# Схема параметрів для генератора пейлоадів
 CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "payload_archetype": {
         "type": str, "required": True,
@@ -74,6 +56,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
             "windows_simple_persistence_stager"
         ]
     },
+    # ... (інші параметри архетипів залишаються без змін) ...
     "message_to_echo": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_echo_payload", "min_length": 1},
     "directory_to_list": {"type": str, "required": lambda params: params.get("payload_archetype") == "demo_file_lister_payload", "default": "."},
     "c2_target_host": {
@@ -161,10 +144,12 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True},
     "enable_amsi_bypass_concept": {"type": bool, "required": False, "default": True},
-    "enable_disk_size_check": {"type": bool, "required": False, "default": True}
+    "enable_disk_size_check": {"type": bool, "required": False, "default": True},
+    # Нові параметри:
+    "enable_stager_logging": {"type": bool, "required": False, "default": False}, # За замовчуванням логування вимкнено
+    "strip_stager_metadata": {"type": bool, "required": False, "default": True}  # За замовчуванням метадані видаляються
 }
 
-# Шаблони архетипів пейлоадів
 CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
     "demo_echo_payload": {"description": "Демо-пейлоад, що друкує повідомлення...", "template_type": "python_stager_echo"},
     "demo_file_lister_payload": {"description": "Демо-пейлоад, що 'перелічує' файли...", "template_type": "python_stager_file_lister"},
