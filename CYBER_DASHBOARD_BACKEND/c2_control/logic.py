@@ -19,6 +19,39 @@ simulated_implants_c2 = []
 pending_tasks_for_implants_c2 = {}
 exfiltrated_file_chunks_db_c2 = {}
 
+# --- Функції доступу (Getters) ---
+def get_simulated_implants_list_c2() -> list:
+    """
+    Повертає копію списку симульованих імплантів.
+    Це запобігає прямому доступу та модифікації оригінального списку ззовні.
+    """
+    global simulated_implants_c2
+    return list(simulated_implants_c2) # Повертаємо копію
+
+def get_exfiltrated_files_summary_c2() -> dict:
+    """
+    Повертає зведену інформацію про файли, що ексфільтруються.
+    """
+    global exfiltrated_file_chunks_db_c2
+    summary = {
+        "active_exfiltrations": 0,
+        "completed_exfiltrations": 0,
+        "files_in_progress": [] # Список файлів, що зараз ексфільтруються
+    }
+    for file_key, file_info in exfiltrated_file_chunks_db_c2.items():
+        if file_info.get('status') == 'completed':
+            summary["completed_exfiltrations"] += 1
+        else: # Вважаємо активним, якщо не позначено як завершене
+            summary["active_exfiltrations"] += 1
+            summary["files_in_progress"].append({
+                "file_path": file_info.get("file_path"),
+                "implant_id": file_info.get("implant_id"),
+                "task_id": file_info.get("task_id"),
+                "progress_chunks": f"{len(file_info.get('received_chunks', {}))}/{file_info.get('total_chunks', 'N/A')}"
+            })
+    return summary
+# --- Кінець функцій доступу ---
+
 def initialize_simulated_implants_c2_logic():
     """
     Ініціалізує або оновлює список симульованих імплантів та очищає пов'язані дані.
@@ -232,36 +265,3 @@ def handle_c2_task_logic(task_data: dict, log_messages: list) -> tuple[dict, int
         "queued_task": task_to_queue,
         "log": "\n".join(log_messages)
     }, 200
-
-# --- Нові функції доступу (Getters) ---
-def get_simulated_implants_list_c2() -> list:
-    """
-    Повертає копію списку симульованих імплантів.
-    Це запобігає прямому доступу та модифікації оригінального списку ззовні.
-    """
-    global simulated_implants_c2
-    return list(simulated_implants_c2) # Повертаємо копію
-
-def get_exfiltrated_files_summary_c2() -> dict:
-    """
-    Повертає зведену інформацію про файли, що ексфільтруються.
-    """
-    global exfiltrated_file_chunks_db_c2
-    summary = {
-        "active_exfiltrations": 0,
-        "completed_exfiltrations": 0,
-        "files_in_progress": [] # Список файлів, що зараз ексфільтруються
-    }
-    for file_key, file_info in exfiltrated_file_chunks_db_c2.items():
-        if file_info.get('status') == 'completed':
-            summary["completed_exfiltrations"] += 1
-        else: # Вважаємо активним, якщо не позначено як завершене
-            summary["active_exfiltrations"] += 1
-            summary["files_in_progress"].append({
-                "file_path": file_info.get("file_path"),
-                "implant_id": file_info.get("implant_id"),
-                "task_id": file_info.get("task_id"),
-                "progress_chunks": f"{len(file_info.get('received_chunks', {}))}/{file_info.get('total_chunks', 'N/A')}"
-            })
-    return summary
-# --- Кінець нових функцій доступу ---

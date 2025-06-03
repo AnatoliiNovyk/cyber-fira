@@ -2,27 +2,22 @@
 # Координатор: Синтаксис
 # Опис: Логіка для модуля оперативних даних та адаптації фреймворку.
 # Оновлено для використання функцій доступу (getters) з c2_control.logic.
+# Змінено шлях імпорту для c2_control.logic.
 
 import random
-import json # Додано, якщо буде використовуватися для форматування параметрів у логах
-from datetime import datetime
+import json 
+from datetime import datetime, timedelta
 import time 
 
 # Імпорти з кореневих файлів проекту
 import config # Доступ до VERSION_BACKEND та CONCEPTUAL_PARAMS_SCHEMA_BE
 
-# Замість прямого імпорту змінних, імпортуємо функції доступу
+# Спроба прямого імпорту, припускаючи, що operational_data та c2_control є частиною одного пакету
+# або знаходяться в директорії, з якої Python може їх імпортувати напряму.
 try:
-    # Припускаємо, що c2_control.logic знаходиться в батьківській директорії
-    # або PYTHONPATH налаштовано відповідним чином для такого імпорту.
-    # Якщо c2_control є частиною того ж пакету, імпорт може бути відносним,
-    # наприклад, from ..c2_control.logic import ...
-    # Для даної структури, де c2_control є сусіднім модулем,
-    # і app_core.py реєструє їх, прямий імпорт з пакета має працювати,
-    # якщо CYBER_DASHBOARD_BACKEND є в sys.path або є встановленим пакетом.
-    from CYBER_DASHBOARD_BACKEND.c2_control.logic import get_simulated_implants_list_c2, get_exfiltrated_files_summary_c2
-except ImportError:
-    print("[OPS_LOGIC_WARN] Не вдалося імпортувати функції доступу з c2_control.logic. Статистика C2 буде недоступна або обмежена.")
+    from c2_control.logic import get_simulated_implants_list_c2, get_exfiltrated_files_summary_c2
+except ImportError as e_import:
+    print(f"[OPS_LOGIC_CRITICAL_WARN] Не вдалося імпортувати функції доступу з c2_control.logic: {e_import}. Статистика C2 буде недоступна або обмежена.")
     # Заглушки для функцій, якщо імпорт не вдався
     def get_simulated_implants_list_c2(): 
         print("[OPS_LOGIC_WARN_STUB] Використовується заглушка для get_simulated_implants_list_c2()")
@@ -64,7 +59,7 @@ def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
         # Генерація випадкових даних для заповнення шаблонів
         op_choice = random.choice(["reconnaissance", "payload_deployment", "exfiltration_attempt", "c2_communication", "evasion_maneuver"])
         target_ip = f"{random.randint(10,192)}.{random.randint(0,168)}.{random.randint(1,200)}.{random.randint(1,254)}"
-        port_choice = random.choice([21, 22, 80, 443, 3306, 3389, 8080])
+        port_choice = random.randint(1, 65535)
         cve_id_choice = f"CVE-202{random.randint(3,5)}-{random.randint(1000,39999)}"
         
         payload_type_choice = "unknown_payload" # Значення за замовчуванням
@@ -72,13 +67,16 @@ def generate_simulated_operational_logs_logic(log_messages: list) -> list[dict]:
         if config.CONCEPTUAL_PARAMS_SCHEMA_BE and \
            "payload_archetype" in config.CONCEPTUAL_PARAMS_SCHEMA_BE and \
            config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"].get("allowed_values"):
-            payload_type_choice = random.choice(config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"])
+            # Перевірка, чи список не порожній перед викликом random.choice
+            allowed_archetypes = config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"]
+            if allowed_archetypes:
+                payload_type_choice = random.choice(allowed_archetypes)
             
         implant_id_choice = f"IMPLNT-{random.randint(100,999)}-{random.choice('ABCDEF')}"
         
         # Створення запису логу
         log_entry = {
-            "timestamp": (datetime.now() - datetime.timedelta(seconds=random.randint(0, 7200))).strftime('%Y-%m-%d %H:%M:%S'), # Логи за останні 2 години
+            "timestamp": (datetime.now() - timedelta(seconds=random.randint(0, 7200))).strftime('%Y-%m-%d %H:%M:%S'), # Логи за останні 2 години
             "level": random.choice(log_levels), 
             "component": random.choice(components),
             "message": random.choice(messages_templates).format(
@@ -147,7 +145,10 @@ def get_simulated_stats_logic(log_messages: list) -> dict:
     if config.CONCEPTUAL_PARAMS_SCHEMA_BE and \
        "payload_archetype" in config.CONCEPTUAL_PARAMS_SCHEMA_BE and \
        config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"].get("allowed_values"):
-        best_archetype = random.choice(config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"])
+        # Перевірка, чи список не порожній перед викликом random.choice
+        allowed_archetypes = config.CONCEPTUAL_PARAMS_SCHEMA_BE["payload_archetype"]["allowed_values"]
+        if allowed_archetypes:
+            best_archetype = random.choice(allowed_archetypes)
     
     active_implants_count = len(current_implants) # Кількість активних імплантів
 
@@ -193,8 +194,11 @@ def get_operational_data_logic(log_messages_main: list) -> tuple[dict, int]:
         }, 200
     except Exception as e:
         # Обробка непередбачених помилок
-        log_messages.append(f"[OPS_LOGIC_GET_DATA_FATAL_ERROR] {str(e)}")
-        return {"success": False, "error": "Server error retrieving operational data", "log": "\n".join(log_messages)}, 500
+        log_messages.append(f"[OPS_LOGIC_GET_DATA_FATAL_ERROR] Непередбачена помилка: {str(e)}")
+        # Для детальної діагностики можна розкоментувати наступні рядки:
+        # import traceback
+        # log_messages.append(traceback.format_exc())
+        return {"success": False, "error": f"Server error retrieving operational data: {str(e)}", "log": "\n".join(log_messages)}, 500
 
 
 def update_framework_rules_logic(rules_data: dict, log_messages_main: list) -> tuple[dict, int]:
