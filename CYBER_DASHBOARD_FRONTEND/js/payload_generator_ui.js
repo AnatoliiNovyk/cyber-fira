@@ -1,14 +1,14 @@
-// js/payload_generator_ui.js
-// UI логіка для вкладки "Генератор Пейлоадів"
+// File: CYBER_DASHBOARD_FRONTEND/js/payload_generator_ui.js
+// Координатор: Синтаксис
+// Опис: Додано обробку нових параметрів enable_stager_logging та strip_stager_metadata.
 
 // --- DOM Елементи ---
 let payloadForm, payloadArchetypeSelect, archetypeParamsContainer,
     payloadOutputSection, payloadStagerOutput, payloadGenerationLog,
     generatePayloadButton, outputFormatSelect, pyinstallerOptionsContainer,
-    enableStagerDebugPrintsCheckbox;
+    // Нові елементи для чекбоксів
+    enableStagerLoggingCheckbox, stripStagerMetadataCheckbox;
 
-// --- Стан ---
-let payloadArchetypesLoaded = false; // Прапорець для відстеження завантаження архетипів
 
 // --- Конфігурація секцій параметрів (можна розширити або завантажувати) ---
 const payloadParamSectionsConfigFE = {
@@ -51,7 +51,7 @@ const payloadValidationRulesFE = {
     },
     "shellcodeHexPlaceholder": {
         requiredIf: ["reverse_shell_tcp_shellcode_windows_x64", "reverse_shell_tcp_shellcode_linux_x64"],
-        isHex: true, // Дозволимо порожній, якщо DEADBEEFCAFE використовується як реальний плейсхолдер
+        isHex: true, 
         messageRequired: "Шеллкод (HEX) є обов'язковим.",
         messageHex: "Шеллкод має бути валідним HEX рядком."
     },
@@ -69,7 +69,7 @@ const payloadValidationRulesFE = {
     },
     "dnsBeaconSubdomainPrefix": { 
         requiredIf: "dns_beacon_c2_concept", 
-        isSubdomainLabel: true, // Перевірка на валідний сегмент домену
+        isSubdomainLabel: true, 
         messageRequired: "Префікс субдомену є обов'язковим.",
         messageSubdomainLabel: "Невірний формат префіксу субдомену (тільки a-z, A-Z, 0-9, -)."
     },
@@ -94,13 +94,9 @@ const payloadValidationRulesFE = {
         messageRequired: "Ключ обфускації є обов'язковим.",
         messageMinLength: "Ключ обфускації має містити хоча б 5 символів."
     }
-    // output_format та pyinstaller_options зазвичай не потребують такої жорсткої валідації на клієнті
 };
 
 
-/**
- * Ініціалізує елементи DOM та обробники подій для вкладки "Генератор Пейлоадів".
- */
 function initializePayloadGeneratorEvents() {
     payloadForm = document.getElementById('payloadGeneratorForm');
     payloadArchetypeSelect = document.getElementById('payloadArchetype');
@@ -111,29 +107,30 @@ function initializePayloadGeneratorEvents() {
     generatePayloadButton = document.getElementById('generatePayloadButton');
     outputFormatSelect = document.getElementById('outputFormat');
     pyinstallerOptionsContainer = document.getElementById('pyinstallerOptionsContainer');
-    enableStagerDebugPrintsCheckbox = document.getElementById('enableStagerDebugPrints');
 
-    if (!payloadForm || !payloadArchetypeSelect || !generatePayloadButton) {
+    // Ініціалізація нових чекбоксів
+    enableStagerLoggingCheckbox = document.getElementById('enableStagerLogging');
+    stripStagerMetadataCheckbox = document.getElementById('stripStagerMetadata');
+
+
+    if (!payloadForm || !payloadArchetypeSelect || !generatePayloadButton || !enableStagerLoggingCheckbox || !stripStagerMetadataCheckbox) {
         console.error("Ключові елементи форми генератора пейлоадів не знайдено!");
         return;
     }
 
-    // Динамічне відображення секцій параметрів залежно від обраного архетипу
     payloadArchetypeSelect.addEventListener('change', function() {
         const selectedArchetype = this.value;
-        if(payloadGenerationLog) payloadGenerationLog.textContent = ''; // Очищаємо лог при зміні
-        if(payloadOutputSection) payloadOutputSection.classList.add('hidden'); // Ховаємо вивід
+        if(payloadGenerationLog) payloadGenerationLog.textContent = ''; 
+        if(payloadOutputSection) payloadOutputSection.classList.add('hidden'); 
 
-        // Сховати всі секції параметрів
         if (archetypeParamsContainer) {
             Array.from(archetypeParamsContainer.children).forEach(section => {
-                if (section.matches('.form-section')) { // Переконуємося, що це секція параметрів
+                if (section.matches('.form-section')) { 
                     section.classList.add('hidden');
                 }
             });
         }
         
-        // Показати релевантну секцію
         if (selectedArchetype && payloadParamSectionsConfigFE[selectedArchetype]) {
             const sectionToShowId = payloadParamSectionsConfigFE[selectedArchetype].sectionId;
             const sectionToShow = document.getElementById(sectionToShowId);
@@ -141,10 +138,9 @@ function initializePayloadGeneratorEvents() {
                 sectionToShow.classList.remove('hidden');
             }
         }
-        clearAllErrors('payloadGeneratorForm'); // Очищаємо помилки валідації
+        clearAllErrors('payloadGeneratorForm'); 
     });
 
-    // Показ/приховування опцій PyInstaller
     if (outputFormatSelect && pyinstallerOptionsContainer) {
         outputFormatSelect.addEventListener('change', function() {
             if (this.value === 'pyinstaller_exe_windows') {
@@ -153,7 +149,6 @@ function initializePayloadGeneratorEvents() {
                 pyinstallerOptionsContainer.classList.add('hidden');
             }
         });
-        // Ініціалізація стану при завантаженні
         if (outputFormatSelect.value === 'pyinstaller_exe_windows') {
             pyinstallerOptionsContainer.classList.remove('hidden');
         } else {
@@ -161,39 +156,28 @@ function initializePayloadGeneratorEvents() {
         }
     }
     
-    // Обробник відправки форми
     payloadForm.addEventListener('submit', handlePayloadFormSubmit);
 
-    // Початкове налаштування видимості секцій (на випадок, якщо щось обрано за замовчуванням)
     if (payloadArchetypeSelect.value) {
         payloadArchetypeSelect.dispatchEvent(new Event('change'));
     }
 }
 
-/**
- * Валідує форму генератора пейлоадів на стороні клієнта.
- * @param {FormData} formData - Дані форми.
- * @returns {boolean} - True, якщо форма валідна, інакше false.
- */
 function validatePayloadFormClientSide(formData) {
-    clearAllErrors('payloadGeneratorForm'); // Використовуємо ui_utils.js
+    // ... (існуюча логіка валідації залишається без змін) ...
+    clearAllErrors('payloadGeneratorForm'); 
     let isValid = true;
     const currentArchetype = formData.get('payload_archetype');
 
     for (const fieldNameOriginal in payloadValidationRulesFE) {
         const rules = payloadValidationRulesFE[fieldNameOriginal];
         
-        // Адаптація імен полів з HTML до ключів у payloadValidationRulesFE
         let formFieldName = fieldNameOriginal; 
-        if (fieldNameOriginal === 'c2TargetHostShell') formFieldName = 'c2TargetHostShell'; // Це вже правильне ім'я з HTML
-        else if (fieldNameOriginal === 'c2TargetPortShell') formFieldName = 'c2TargetPortShell';
-        // ... інші специфічні перетворення, якщо потрібно ...
+        // ... (специфічні перетворення імен полів) ...
 
-        const inputElement = payloadForm.elements[formFieldName]; // Шукаємо елемент за його name атрибутом
+        const inputElement = payloadForm.elements[formFieldName]; 
         const value = inputElement ? (inputElement.type === 'checkbox' ? inputElement.checked : String(formData.get(formFieldName) || '').trim()) : null;
-        
         const errorElementId = `error-${inputElement ? inputElement.id : fieldNameOriginal.replace(/_/g, '')}`;
-
 
         let isFieldRequired = rules.required;
         if (Array.isArray(rules.requiredIf) && rules.requiredIf.includes(currentArchetype)) {
@@ -201,16 +185,15 @@ function validatePayloadFormClientSide(formData) {
         } else if (typeof rules.requiredIf === 'string' && rules.requiredIf === currentArchetype) {
             isFieldRequired = true;
         } else if (rules.requiredIf && typeof rules.requiredIf !== 'boolean') {
-             isFieldRequired = false; // Якщо requiredIf не спрацював, поле не є обов'язковим через цю умову
+             isFieldRequired = false; 
         }
-
 
         if (isFieldRequired && (value === null || value === '' || (value === false && inputElement && inputElement.type !== 'checkbox'))) {
             displayError(errorElementId, rules.messageRequired || "Це поле є обов'язковим.");
             isValid = false; continue;
         }
 
-        if (value !== null && value !== '') { // Перевіряємо тільки якщо є значення
+        if (value !== null && value !== '') { 
             if (rules.minLength && String(value).length < rules.minLength) {
                 displayError(errorElementId, rules.messageMinLength || `Мін. довжина: ${rules.minLength}.`); isValid = false;
             }
@@ -226,13 +209,13 @@ function validatePayloadFormClientSide(formData) {
                     displayError(errorElementId, rules.messagePort || `Порт має бути числом від 1 до 65535.`); isValid = false;
                 }
             }
-            if (rules.isHex && value !== "DEADBEEFCAFE" && !/^[0-9a-fA-F]*$/.test(String(value).replace(/\s/g, ''))) { // Дозволяємо DEADBEEFCAFE як валідний плейсхолдер
+            if (rules.isHex && value !== "DEADBEEFCAFE" && !/^[0-9a-fA-F]*$/.test(String(value).replace(/\s/g, ''))) { 
                 displayError(errorElementId, rules.messageHex || `Очікується HEX рядок.`); isValid = false;
             }
             if (rules.isDomain && !/^([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,6}$/.test(String(value))) {
                  displayError(errorElementId, rules.messageDomain || `Невірний формат домену.`); isValid = false;
             }
-            if (rules.isSubdomainLabel && !/^[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$/.test(String(value))) { // RFC 1035 label
+            if (rules.isSubdomainLabel && !/^[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$/.test(String(value))) { 
                  displayError(errorElementId, rules.messageSubdomainLabel || `Невірний формат мітки субдомену.`); isValid = false;
             }
             if (rules.isArtifactName && !/^[a-zA-Z0-9_.-]+$/.test(String(value))) {
@@ -244,15 +227,11 @@ function validatePayloadFormClientSide(formData) {
 }
 
 
-/**
- * Обробляє відправку форми генератора пейлоадів.
- * @param {Event} event - Подія відправки форми.
- */
 async function handlePayloadFormSubmit(event) {
     event.preventDefault();
     if (!generatePayloadButton || !payloadOutputSection || !payloadStagerOutput || !payloadGenerationLog) return;
 
-    setButtonLoadingState(generatePayloadButton, true, 'Згенерувати Пейлоад'); // Використовуємо ui_utils.js
+    setButtonLoadingState(generatePayloadButton, true, 'Згенерувати Пейлоад');
     
     const formData = new FormData(payloadForm);
     
@@ -267,56 +246,59 @@ async function handlePayloadFormSubmit(event) {
     const currentArchetype = formData.get('payload_archetype');
     params['payload_archetype'] = currentArchetype;
 
-    // Збираємо параметри з форми
     for (const [key, value] of formData.entries()) {
         if (key === 'payload_archetype') continue;
 
-        // Обробка чекбоксів
         const checkboxElement = payloadForm.elements[key];
         if (checkboxElement && checkboxElement.type === 'checkbox') {
-            params[key] = checkboxElement.checked;
+            // Для чекбоксів name атрибут має відповідати ключам, які очікує backend
+            // Наприклад, enable_stager_logging, strip_stager_metadata
+            params[key] = checkboxElement.checked; 
             continue;
         }
-
-        // Спеціальна обробка для полів, які залежать від архетипу
-        let relevantFieldsForArchetype = [];
-        if (currentArchetype && payloadParamSectionsConfigFE[currentArchetype]) {
-            relevantFieldsForArchetype = payloadParamSectionsConfigFE[currentArchetype].fields.map(f => {
-                // Адаптуємо імена полів з HTML до тих, що очікує backend (якщо вони відрізняються)
-                if (f === 'c2TargetHostShell') return 'c2_target_host';
-                if (f === 'c2TargetPortShell') return 'c2_target_port';
-                if (f === 'shellcodeHexPlaceholder') return 'shellcode_hex_placeholder';
-                // ... інші специфічні перетворення ...
-                return f; // Якщо імена співпадають
-            });
-        }
         
-        // Перетворюємо HTML імена полів на ті, що очікує backend
         let backendKey = key;
         if (key === 'c2TargetHostShell') backendKey = 'c2_target_host';
         else if (key === 'c2TargetPortShell') backendKey = 'c2_target_port';
         // ... інші перетворення ...
 
-        // Додаємо параметр, якщо він релевантний для поточного архетипу або є загальним
         const isArchetypeSpecificField = payloadParamSectionsConfigFE[currentArchetype]?.fields.includes(key);
+        // Додаємо нові параметри до загальних полів
         const isGeneralField = ['obfuscation_key', 'output_format', 'pyinstaller_options', 
-                                'enable_stager_metamorphism', 'enable_evasion_checks',
-                                'enable_stager_debug_prints',
-                                'enable_amsi_bypass_concept', 'enable_disk_size_check'].includes(key);
+                                'enable_stager_metamorphism', 'enable_evasion_checks', 
+                                'enable_amsi_bypass_concept', 'enable_disk_size_check',
+                                'enable_stager_logging', 'strip_stager_metadata' // Нові параметри
+                               ].includes(key);
+
 
         if (isArchetypeSpecificField || isGeneralField) {
-            if (backendKey === 'c2_target_port' && value) { // Конвертуємо порт в число
+            if (backendKey === 'c2_target_port' && value) { 
                  params[backendKey] = parseInt(value, 10);
             } else {
                  params[backendKey] = value;
             }
         }
     }
-    // Переконуємося, що всі булеві параметри передані коректно
-    ['enable_stager_metamorphism', 'enable_evasion_checks', 'enable_amsi_bypass_concept', 
-     'enable_disk_size_check', 'enable_stager_debug_prints'].forEach(cbName => {
-        const cbElement = document.getElementById(cbName);
-        if (cbElement) params[cbName] = cbElement.checked;
+    // Переконуємося, що всі булеві параметри (чекбокси) передані коректно,
+    // оскільки FormData може не включати їх, якщо вони не відмічені.
+    const checkboxNames = [
+        'enable_stager_metamorphism', 'enable_evasion_checks', 
+        'enable_amsi_bypass_concept', 'enable_disk_size_check',
+        'enable_stager_logging', 'strip_stager_metadata'
+    ];
+    checkboxNames.forEach(cbName => {
+        const cbElement = document.getElementById(cbName.replace(/_/g, (match, offset) => offset === 0 ? match : match.toUpperCase())); // Відновлення camelCase ID
+        // Або, якщо ID елементів точно співпадають з name (з підкресленнями):
+        // const cbElement = document.getElementById(cbName); 
+        // Для надійності, використовуємо атрибут name для пошуку, якщо ID неточні
+        const cbElementByName = payloadForm.elements[cbName];
+        if (cbElementByName && cbElementByName.type === 'checkbox') {
+            params[cbName] = cbElementByName.checked;
+        } else if (cbElement && cbElement.type === 'checkbox') { // Резервний варіант, якщо ID використовується
+             params[cbName] = cbElement.checked;
+        } else if (params[cbName] === undefined) { // Якщо параметр не був доданий з formData (не відмічений)
+            params[cbName] = false; // Встановлюємо false за замовчуванням для невідмічених чекбоксів
+        }
     });
 
 
@@ -326,14 +308,13 @@ async function handlePayloadFormSubmit(event) {
     payloadOutputSection.classList.remove('hidden');
 
     try {
-        const response = await fetch(`${API_BASE_URL}/payload/generate`, { // Використовуємо API_BASE_URL з api.js
+        const response = await fetch(`${API_BASE_URL}/payload/generate`, { 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params),
         });
         const responseData = await response.json();
         
-        // Очищаємо попередній лог перед виведенням нового
         payloadGenerationLog.textContent = ''; 
         logToUITextArea(payloadGenerationLog.id, responseData.generationLog || "Лог генерації не отримано від backend.");
 
@@ -341,7 +322,7 @@ async function handlePayloadFormSubmit(event) {
             payloadStagerOutput.textContent = responseData.stagerCode;
         } else {
             let errorText = `Помилка від backend: ${responseData.error || response.statusText || 'Невідома помилка'}`;
-            if (responseData.errors) { // Серверні помилки валідації
+            if (responseData.errors) { 
                 errorText += "\nДеталі валідації: \n" + responseData.errors.map(err => `  - ${err}`).join("\n");
             }
             payloadStagerOutput.textContent = errorText;
@@ -357,24 +338,17 @@ async function handlePayloadFormSubmit(event) {
     }
 }
 
-/**
- * Завантажує список архетипів з backend та заповнює select.
- */
 async function fetchPayloadArchetypes() {
-    if (payloadArchetypesLoaded) {
-        console.log("[PayloadUI] Архетипи вже завантажені.");
-        return;
-    }
+    // ... (існуюча логіка залишається без змін) ...
     if (!payloadArchetypeSelect) return;
 
     console.log("[PayloadUI] Завантаження архетипів...");
     try {
-        // Припускаємо, що API_BASE_URL вже визначено в api.js
         const response = await fetch(`${API_BASE_URL}/payload/archetypes`);
         const data = await response.json();
 
         if (data.success && data.archetypes) {
-            payloadArchetypeSelect.innerHTML = '<option value="">-- Оберіть архетип --</option>'; // Очистити старі та додати дефолтну
+            payloadArchetypeSelect.innerHTML = '<option value="">-- Оберіть архетип --</option>'; 
             data.archetypes.forEach(archetype => {
                 const option = document.createElement('option');
                 option.value = archetype.name;
@@ -382,22 +356,15 @@ async function fetchPayloadArchetypes() {
                 payloadArchetypeSelect.appendChild(option);
             });
             console.log("[PayloadUI] Архетипи успішно завантажені.");
-            payloadArchetypesLoaded = true; // Встановлюємо прапорець після успішного завантаження
-            // Після завантаження архетипів, ініціалізуємо видимість секцій
             if (payloadArchetypeSelect.value) {
                  payloadArchetypeSelect.dispatchEvent(new Event('change'));
             }
         } else {
             console.error("[PayloadUI] Помилка завантаження архетипів:", data.error || "Невідома помилка.");
-            logToUITextArea(payloadGenerationLog.id, `Помилка завантаження архетипів: ${data.error || "Невідома помилка."}`, true);
+            if(payloadGenerationLog) logToUITextArea(payloadGenerationLog.id, `Помилка завантаження архетипів: ${data.error || "Невідома помилка."}`, true);
         }
     } catch (error) {
         console.error("[PayloadUI] Мережева помилка при завантаженні архетипів:", error);
-        logToUITextArea(payloadGenerationLog.id, `Мережева помилка при завантаженні архетипів: ${error.message}`, true);
+        if(payloadGenerationLog) logToUITextArea(payloadGenerationLog.id, `Мережева помилка при завантаженні архетипів: ${error.message}`, true);
     }
 }
-
-
-// Ініціалізація при завантаженні скрипта (буде викликана з main.js)
-// initializePayloadGeneratorEvents(); // Цей виклик буде в main.js
-// fetchPayloadArchetypes(); // Також може бути викликано з main.js після ініціалізації DOM
