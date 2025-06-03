@@ -1,12 +1,12 @@
 # c2_control/logic.py
 # Основна логіка для модуля C2 (Командування та Контроль)
 
+import base64
 import json
 import random
 import string
 import time
 import uuid
-import base64
 from datetime import datetime
 
 # Імпорти з кореневих файлів проекту

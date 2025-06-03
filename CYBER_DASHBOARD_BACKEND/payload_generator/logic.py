@@ -1,6 +1,7 @@
 # payload_generator/logic.py
 # Основна логіка для генерації пейлоадів
 
+import shutil
 import json
 import base64
 import re
