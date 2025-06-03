@@ -1,34 +1,45 @@
-# config.py
-# Конфігураційні змінні, константи, схеми та бази даних для CYBER DASHBOARD
+# CYBER_DASHBOARD_BACKEND/config.py
+# Координатор: Синтаксис
+# Опис: Конфігураційні змінні, константи, схеми та бази даних для CYBER DASHBOARD
+# Оновлено ключ для OpenSSH у MOCK_EXTERNAL_CVE_API_DB для кращого зіставлення.
 
 import os
 
 # Версія Backend
-VERSION_BACKEND = "1.9.9" # Або нова версія після рефакторингу, наприклад, "2.0.0-refactored"
+VERSION_BACKEND = "1.9.9" # Або актуальна версія вашого проекту
 
 # Конфігурація NVD API
 NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-NVD_API_KEY = os.environ.get("NVD_API_KEY") # Завантажуватиметься з os.environ.get("NVD_API_KEY") в app_core.py або reconnaissance/logic.py
+NVD_API_KEY = os.environ.get("NVD_API_KEY") 
 NVD_REQUEST_TIMEOUT_SECONDS = 15
 NVD_RESULTS_PER_PAGE = 20
 
 # Внутрішня (можливо, застаріла або резервна) база CVE
 CONCEPTUAL_CVE_DATABASE_BE = {
-    "apache httpd 2.4.53": [{"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.53 and earlier may not send the X-Frame-Options header..."}],
-    "openssh 8.2p1": [{"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "sshd in OpenSSH 6.2 through 8.8 allows remote attackers to bypass..."}],
-    "vsftpd 3.0.3": [{"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "vsftpd 3.0.3 and earlier allows remote attackers to cause a denial of service..."}],
+    # Приклад: Ключ має бути точним "продукт версія"
+    "apache httpd 2.4.6": [{"cve_id": "CVE-2017-7679", "severity": "HIGH", "summary": "Apache HTTP Server 2.4.6 to 2.4.27 mod_mime buffer overflow (Internal DB).", "source": "Internal Fallback DB"}],
+    "openssh 7.4": [{"cve_id": "CVE-2020-15778", "severity": "MEDIUM", "summary": "OpenSSH 7.4 command injection vulnerability (Internal DB).", "source": "Internal Fallback DB"}],
     # Додайте інші за потреби
 }
 
-# Імітація зовнішньої бази даних CVE (залишено для резервного механізму)
+# Імітація зовнішньої бази даних CVE
 MOCK_EXTERNAL_CVE_API_DB = {
-    "apache httpd 2.4.53": [
+    # Ключ для Apache httpd залишаємо з версією, оскільки логіка зіставлення для нього спрацювала
+    "apache httpd 2.4.53": [ # Цей ключ використовувався для зіставлення з "apache httpd 2.4.6"
         {"cve_id": "CVE-2022-22721", "severity": "HIGH", "summary": "X-Frame-Options header issue in Apache HTTP Server <=2.4.53 (Mock DB).", "source": "Mock External API"},
         {"cve_id": "CVE-2021-44224", "severity": "MEDIUM", "summary": "Possible NULL pointer dereference in Apache HTTP Server 2.4.52 and earlier (Mock DB).", "source": "Mock External API"}
     ],
-    "openssh 8.2p1": [
-        {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH 6.2-8.8 (Mock DB).", "source": "Mock External API"}
+    # Змінюємо ключ для OpenSSH на більш загальний, щоб він зіставлявся з різними версіями,
+    # або додаємо конкретний для "openssh 7.4", якщо CVE специфічні.
+    # Варіант 1: Загальний ключ (рекомендовано для гнучкості mock-бази)
+    "openssh": [ # Раніше було "openssh 8.2p1"
+        {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH (covers various versions including 6.2-8.8) (Mock DB).", "source": "Mock External API"}
+        # Можна додати сюди інші CVE для OpenSSH, якщо потрібно
     ],
+    # Варіант 2 (якщо потрібна точність і CVE-2021-41617 дійсно стосується 7.4):
+    # "openssh 7.4": [
+    #     {"cve_id": "CVE-2021-41617", "severity": "MEDIUM", "summary": "Remote attacker bypass in sshd OpenSSH 7.4 (Mock DB).", "source": "Mock External API"}
+    # ],
     "vsftpd 3.0.3": [
         {"cve_id": "CVE-2015-1419", "severity": "CRITICAL", "summary": "Denial of service in vsftpd <=3.0.3 (Mock DB).", "source": "Mock External API"}
     ],
@@ -84,7 +95,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "c2_beacon_endpoint": {
         "type": str,
         "required": lambda params: params.get("payload_archetype") == "demo_c2_beacon_payload",
-        "default": "http://localhost:5000/api/c2/beacon_receiver", # Цей URL може потребувати оновлення, якщо зміниться структура API
+        "default": "http://localhost:5000/api/c2/beacon_receiver", 
         "validation_regex": r"^(http|https)://[a-zA-Z0-9\-\.]+(:\d+)?(?:/[^/?#]*)?(?:\?[^#]*)?(?:#.*)?$"
     },
     "c2_dns_zone": {
@@ -150,8 +161,7 @@ CONCEPTUAL_PARAMS_SCHEMA_BE = {
     "enable_stager_metamorphism": {"type": bool, "required": False, "default": True},
     "enable_evasion_checks": {"type": bool, "required": False, "default": True},
     "enable_amsi_bypass_concept": {"type": bool, "required": False, "default": True},
-    "enable_disk_size_check": {"type": bool, "required": False, "default": True},
-    "enable_stager_debug_prints": {"type": bool, "required": False, "default": False}
+    "enable_disk_size_check": {"type": bool, "required": False, "default": True}
 }
 
 # Шаблони архетипів пейлоадів
@@ -180,11 +190,3 @@ CONCEPTUAL_ARCHETYPE_TEMPLATES_BE = {
         "template_type": "python_stager_windows_persistence"
     }
 }
-
-# Глобальні змінні для симуляції стану C2 (можуть бути переміщені до c2_control/state_manager.py пізніше)
-# Наразі залишаємо їх тут для простоти, але в app_core.py їх потрібно буде імпортувати або передавати
-# simulated_implants_be = []
-# pending_tasks_for_implants = {}
-# exfiltrated_file_chunks_db = {}
-# Ці змінні будуть ініціалізовані та керовані в c2_control модулі або в app_core.py.
-
